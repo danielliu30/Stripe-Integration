@@ -7,6 +7,8 @@ import com.ender.takehome.model.LeaseStatus
 import com.ender.takehome.repository.LeaseRepository
 import com.ender.takehome.repository.TenantRepository
 import com.ender.takehome.repository.UnitRepository
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -17,12 +19,13 @@ class LeaseService(
     private val unitRepository: UnitRepository,
 ) {
 
-    fun getAll(): List<Lease> = leaseRepository.findAll()
+    fun getAll(pageable: Pageable): Page<Lease> = leaseRepository.findAll(pageable)
 
     fun getById(id: Long): Lease =
         leaseRepository.findById(id).orElseThrow { ResourceNotFoundException("Lease not found: $id") }
 
-    fun getByTenantId(tenantId: Long): List<Lease> = leaseRepository.findByTenantId(tenantId)
+    fun getByTenantId(tenantId: Long, pageable: Pageable): Page<Lease> =
+        leaseRepository.findByTenantId(tenantId, pageable)
 
     fun getActiveLeases(): List<Lease> = leaseRepository.findByStatus(LeaseStatus.ACTIVE)
 

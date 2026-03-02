@@ -14,6 +14,15 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  data:
+    web:
+      pageable:
+        default-page-size: 20
+        max-page-size: 100
+
+jwt:
+  secret: test-jwt-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256
+  expiration-ms: 86400000
 
 aws:
   region: us-east-1

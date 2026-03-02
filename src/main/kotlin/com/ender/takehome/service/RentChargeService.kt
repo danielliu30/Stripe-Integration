@@ -5,6 +5,8 @@ import com.ender.takehome.model.Lease
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.repository.RentChargeRepository
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -17,10 +19,11 @@ class RentChargeService(
     fun getById(id: Long): RentCharge =
         rentChargeRepository.findById(id).orElseThrow { ResourceNotFoundException("Rent charge not found: $id") }
 
-    fun getByLeaseId(leaseId: Long): List<RentCharge> = rentChargeRepository.findByLeaseId(leaseId)
+    fun getByLeaseId(leaseId: Long, pageable: Pageable): Page<RentCharge> =
+        rentChargeRepository.findByLeaseId(leaseId, pageable)
 
-    fun getPendingByLeaseId(leaseId: Long): List<RentCharge> =
-        rentChargeRepository.findByLeaseIdAndStatus(leaseId, RentChargeStatus.PENDING)
+    fun getPendingByLeaseId(leaseId: Long, pageable: Pageable): Page<RentCharge> =
+        rentChargeRepository.findByLeaseIdAndStatus(leaseId, RentChargeStatus.PENDING, pageable)
 
     /**
      * Generate a rent charge for a lease for the given month.

@@ -1,7 +1,6 @@
 package com.ender.takehome.service
 
 import com.ender.takehome.TestFixtures
-import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.repository.RentChargeRepository
 import io.mockk.*

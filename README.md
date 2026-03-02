@@ -7,11 +7,12 @@ A simplified property management API built with Kotlin + Spring Boot. This is a 
 This repo contains a working property management platform with:
 
 - **Entities**: Property managers, properties, units, tenants, leases, rent charges, and manual (offline) payments
-- **REST API**: Full CRUD for all entities above
+- **REST API**: Full CRUD for all entities with pagination and role-based access control
+- **Authentication**: JWT-based auth with login endpoint, two roles (TENANT, PROPERTY_MANAGER)
 - **Database**: MySQL 8 with Flyway migrations and seed data
 - **S3 Integration**: File storage service wired to LocalStack S3
 - **SQS Background Worker**: Polling-based job processor with an example job (rent charge generation)
-- **Tests**: Unit tests with MockK, controller tests with MockMvc
+- **Tests**: Unit tests with MockK, controller tests with MockMvc + JWT auth
 
 ## Prerequisites
 
@@ -28,7 +29,7 @@ docker-compose up -d
 ./gradlew bootRun
 
 # Run the background worker (in a separate terminal)
-WORKER_ENABLED=true ./gradlew bootRun --args='--worker.enabled=true'
+./gradlew bootRun --args='--worker.enabled=true'
 
 # Run tests
 ./gradlew test
@@ -36,44 +37,122 @@ WORKER_ENABLED=true ./gradlew bootRun --args='--worker.enabled=true'
 
 The API starts on `http://localhost:8080`.
 
+## Authentication
+
+All API endpoints (except `/api/auth/**`) require a valid JWT token in the `Authorization` header.
+
+### Login
+
+```bash
+# Login as property manager
+curl -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "admin@greenfieldproperties.com", "password": "password"}'
+
+# Login as tenant
+curl -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "alice.johnson@email.com", "password": "password"}'
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "userId": 1,
+  "email": "admin@greenfieldproperties.com",
+  "role": "PROPERTY_MANAGER"
+}
+```
+
+### Using the Token
+
+```bash
+curl http://localhost:8080/api/leases \
+  -H 'Authorization: Bearer <token>'
+```
+
+### Seeded Users
+
+| Email | Password | Role |
+|-------|----------|------|
+| admin@greenfieldproperties.com | password | PROPERTY_MANAGER |
+| alice.johnson@email.com | password | TENANT |
+| bob.smith@email.com | password | TENANT |
+| carol.williams@email.com | password | TENANT |
+
+### Role-Based Access
+
+- **Property managers** can manage properties, units, tenants, leases, and record manual payments
+- **Tenants** can view their own leases and rent charges
+- All authenticated users can access lease and rent charge read endpoints
+
+## Pagination
+
+All list endpoints return paginated responses. Use query parameters to control pagination:
+
+```bash
+# Default: page 0, size 20
+curl http://localhost:8080/api/tenants -H 'Authorization: Bearer <token>'
+
+# Custom page and size
+curl 'http://localhost:8080/api/tenants?page=0&size=10&sort=createdAt,desc' \
+  -H 'Authorization: Bearer <token>'
+```
+
+Response format:
+```json
+{
+  "content": [...],
+  "totalElements": 42,
+  "totalPages": 3,
+  "size": 20,
+  "number": 0
+}
+```
+
 ## API Endpoints
 
-### Tenants
-- `GET    /api/tenants` — List all tenants
+### Authentication
+- `POST   /api/auth/login` — Authenticate and receive JWT token
+
+### Tenants (PM only for list/create/update)
+- `GET    /api/tenants` — List all tenants (paginated)
 - `GET    /api/tenants/{id}` — Get tenant by ID
 - `POST   /api/tenants` — Create tenant
 - `PUT    /api/tenants/{id}` — Update tenant
 
-### Properties & Units
-- `GET    /api/properties` — List all properties
+### Properties & Units (PM only)
+- `GET    /api/properties` — List all properties (paginated)
 - `GET    /api/properties/{id}` — Get property by ID
 - `POST   /api/properties` — Create property
-- `GET    /api/properties/{id}/units` — List units for a property
+- `GET    /api/properties/{id}/units` — List units for a property (paginated)
 - `POST   /api/properties/{id}/units` — Create unit
 
 ### Leases
-- `GET    /api/leases` — List all leases
+- `GET    /api/leases` — List leases (tenants see only their own, PMs see all; paginated)
 - `GET    /api/leases/{id}` — Get lease by ID
-- `GET    /api/leases?tenantId={id}` — Get leases by tenant
-- `POST   /api/leases` — Create lease
+- `GET    /api/leases?tenantId={id}` — Get leases by tenant (PM only; paginated)
+- `POST   /api/leases` — Create lease (PM only)
 
 ### Rent Charges
 - `GET    /api/rent-charges/{id}` — Get rent charge by ID
-- `GET    /api/rent-charges?leaseId={id}` — Get charges by lease
+- `GET    /api/rent-charges?leaseId={id}` — Get charges by lease (paginated)
+- `GET    /api/rent-charges?leaseId={id}&status=PENDING` — Filter by status (paginated)
 
-### Manual Payments
-- `GET    /api/manual-payments?rentChargeId={id}` — Get payments for a charge
+### Manual Payments (PM only)
+- `GET    /api/manual-payments?rentChargeId={id}` — Get payments for a charge (paginated)
 - `POST   /api/manual-payments` — Record a manual payment
 
 ## Architecture
 
 ```
 src/main/kotlin/com/ender/takehome/
-├── config/          # AWS and Jackson configuration
+├── config/          # Security, JWT, AWS, Jackson configuration
 ├── model/           # JPA entities
-├── repository/      # Spring Data JPA repositories
+├── repository/      # Spring Data JPA repositories (with @EntityGraph for N+1 prevention)
 ├── service/         # Business logic
-├── controller/      # REST controllers
+├── controller/      # REST controllers with pagination and auth
 ├── worker/          # SQS background job processor
 ├── dto/             # Request/response DTOs
 └── exception/       # Error handling
@@ -88,7 +167,7 @@ src/main/kotlin/com/ender/takehome/
 
 ### Seed Data
 
-The migration creates sample data: 1 property manager, 2 properties, 4 units, 3 tenants, 2 active leases, and some rent charges with manual payments.
+The migration creates sample data: 1 property manager, 2 properties, 4 units, 3 tenants, 2 active leases, rent charges with manual payments, and 4 user accounts.
 
 ## Your Task
 
