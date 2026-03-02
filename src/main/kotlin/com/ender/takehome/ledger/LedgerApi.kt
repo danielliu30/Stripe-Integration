@@ -1,17 +1,24 @@
 package com.ender.takehome.ledger
 
+import com.ender.takehome.dto.request.GenerateRentChargesRequest
 import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.dto.response.PaymentResponse
 import com.ender.takehome.dto.response.RentChargeResponse
 import com.ender.takehome.model.RentChargeStatus
+import com.ender.takehome.worker.BackgroundJobRequest
+import com.ender.takehome.worker.BackgroundJobType
+import com.ender.takehome.worker.JobPublisher
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
 
 @RestController
-class LedgerApi(private val ledgerModule: LedgerModule) {
+class LedgerApi(
+    private val ledgerModule: LedgerModule,
+    private val jobPublisher: JobPublisher,
+) {
 
     // --- Rent Charges ---
 
@@ -42,6 +49,17 @@ class LedgerApi(private val ledgerModule: LedgerModule) {
             ledgerModule.getChargesByLeaseId(leaseId, startAfterId, limit)
         }
         return CursorPage(page.content.map { RentChargeResponse.from(it) }, page.hasMore)
+    }
+
+    // --- Rent Charge Generation ---
+
+    @PostMapping("/api/rent-charges/generate")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PreAuthorize("hasRole('PROPERTY_MANAGER')")
+    fun generateRentCharges(@RequestBody(required = false) request: GenerateRentChargesRequest?) {
+        val params = mutableMapOf<String, Any>()
+        request?.dueDate?.let { params["dueDate"] = it.toString() }
+        jobPublisher.publish(BackgroundJobRequest(BackgroundJobType.GENERATE_RENT_CHARGES, params))
     }
 
     // --- Manual Payments ---

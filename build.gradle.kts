@@ -59,6 +59,10 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.4"))
+    testImplementation("org.testcontainers:testcontainers")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.awaitility:awaitility:4.2.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testRuntimeOnly("com.h2database:h2")
 
@@ -70,7 +74,8 @@ dependencies {
 idea {
     module {
         sourceDirs = sourceDirs + file("src/main/kotlin") + file("build/generated-sources/jooq")
-        testSources.from(file("src/test/kotlin"))
+        testSources.from(file("src/test/kotlin"), file("src/integrationTest/kotlin"))
+        testResources.from(file("src/integrationTest/resources"))
     }
 }
 
@@ -80,6 +85,21 @@ sourceSets {
             srcDir("build/generated-sources/jooq")
         }
     }
+    create("integrationTest") {
+        kotlin {
+            srcDir("src/integrationTest/kotlin")
+        }
+        resources.srcDir("src/integrationTest/resources")
+        compileClasspath += sourceSets["main"].output + sourceSets["test"].output
+        runtimeClasspath += sourceSets["main"].output + sourceSets["test"].output
+    }
+}
+
+val integrationTestImplementation by configurations.getting {
+    extendsFrom(configurations["testImplementation"])
+}
+val integrationTestRuntimeOnly by configurations.getting {
+    extendsFrom(configurations["testRuntimeOnly"])
 }
 
 jooq {
@@ -125,6 +145,36 @@ tasks.named("compileKotlin") {
     dependsOn("jooqCodegen")
 }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+tasks.named<Test>("test") {
+    useJUnitPlatform {
+        excludeTags("integration")
+    }
+}
+
+tasks.named("processIntegrationTestResources") {
+    // integrationTest classpath includes test output which also has application.yml;
+    // keep the integrationTest copy and skip the duplicate from test resources.
+    (this as Copy).duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests (requires Docker)."
+    group = "verification"
+    testClassesDirs = sourceSets["integrationTest"].output.classesDirs
+    classpath = sourceSets["integrationTest"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    shouldRunAfter(tasks.named("test"))
+
+    // Detect Colima or other non-default Docker socket locations
+    val dockerHost = System.getenv("DOCKER_HOST")
+    if (dockerHost == null) {
+        val colimaSocket = file("${System.getProperty("user.home")}/.colima/default/docker.sock")
+        if (colimaSocket.exists()) {
+            environment("DOCKER_HOST", "unix://${colimaSocket.absolutePath}")
+            // Inside the Colima VM the socket is at /var/run/docker.sock
+            environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+        }
+    }
 }

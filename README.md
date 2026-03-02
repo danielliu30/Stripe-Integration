@@ -31,8 +31,14 @@ docker-compose up -d
 # Run the background worker (in a separate terminal)
 ./gradlew bootRun --args='--worker.enabled=true'
 
-# Run tests
+# Run unit tests
 ./gradlew test
+
+# Run integration tests (Docker required — spins up ElasticMQ via Testcontainers)
+./gradlew integrationTest
+
+# Run both
+./gradlew test integrationTest
 ```
 
 The API starts on `http://localhost:8080`.

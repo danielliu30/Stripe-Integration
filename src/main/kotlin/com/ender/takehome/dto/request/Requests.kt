@@ -45,3 +45,7 @@ data class RecordPaymentRequest(
     val notes: String? = null,
     @field:NotBlank val recordedBy: String,
 )
+
+data class GenerateRentChargesRequest(
+    val dueDate: LocalDate? = null,
+)
