@@ -6,7 +6,7 @@ import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.dto.response.PropertyResponse
 import com.ender.takehome.dto.response.UnitResponse
 import com.ender.takehome.exception.ResourceNotFoundException
-import com.ender.takehome.model.ApartmentUnit
+import com.ender.takehome.model.PropertyUnit
 import com.ender.takehome.model.Property
 import com.ender.takehome.repository.PropertyManagerRepository
 import com.ender.takehome.repository.PropertyRepository
@@ -76,7 +76,7 @@ class PropertyController(
         propertyRepository.findById(id)
             ?: throw ResourceNotFoundException("Property not found: $id")
 
-        val unit = ApartmentUnit(propertyId = id, unitNumber = request.unitNumber)
+        val unit = PropertyUnit(propertyId = id, unitNumber = request.unitNumber)
         return UnitResponse.from(unitRepository.save(unit))
     }
 }

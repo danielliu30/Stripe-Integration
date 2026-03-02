@@ -26,7 +26,7 @@ object TestFixtures {
         id: Long = 1L,
         propertyId: Long = 1L,
         unitNumber: String = "101",
-    ) = ApartmentUnit(id = id, propertyId = propertyId, unitNumber = unitNumber)
+    ) = PropertyUnit(id = id, propertyId = propertyId, unitNumber = unitNumber)
 
     fun tenant(
         id: Long = 1L,

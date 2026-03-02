@@ -35,7 +35,7 @@ data class UnitResponse(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(u: ApartmentUnit) = UnitResponse(u.id, u.propertyId, u.unitNumber, u.createdAt)
+        fun from(u: PropertyUnit) = UnitResponse(u.id, u.propertyId, u.unitNumber, u.createdAt)
     }
 }
 

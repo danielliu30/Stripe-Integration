@@ -2,7 +2,7 @@ package com.ender.takehome.repository
 
 import com.ender.takehome.generated.tables.Units.UNITS
 import com.ender.takehome.generated.tables.records.UnitsRecord
-import com.ender.takehome.model.ApartmentUnit
+import com.ender.takehome.model.PropertyUnit
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Component
@@ -11,13 +11,13 @@ import java.time.ZoneOffset
 @Component
 class UnitRepository(private val dsl: DSLContext) {
 
-    fun findById(id: Long): ApartmentUnit? =
+    fun findById(id: Long): PropertyUnit? =
         dsl.selectFrom(UNITS)
             .where(UNITS.ID.eq(id))
             .fetchOne()
             ?.toModel()
 
-    fun findByPropertyIdCursor(propertyId: Long, startAfterId: Long?, limit: Int): List<ApartmentUnit> =
+    fun findByPropertyIdCursor(propertyId: Long, startAfterId: Long?, limit: Int): List<PropertyUnit> =
         dsl.selectFrom(UNITS)
             .where(UNITS.PROPERTY_ID.eq(propertyId))
             .and(cursorCondition(startAfterId))
@@ -26,7 +26,7 @@ class UnitRepository(private val dsl: DSLContext) {
             .fetch()
             .map { it.toModel() }
 
-    fun save(unit: ApartmentUnit): ApartmentUnit {
+    fun save(unit: PropertyUnit): PropertyUnit {
         if (unit.id == 0L) {
             val record = dsl.newRecord(UNITS).apply {
                 propertyId = unit.propertyId
@@ -45,7 +45,7 @@ class UnitRepository(private val dsl: DSLContext) {
     private fun cursorCondition(startAfterId: Long?) =
         if (startAfterId != null) UNITS.ID.gt(startAfterId) else DSL.noCondition()
 
-    private fun UnitsRecord.toModel() = ApartmentUnit(
+    private fun UnitsRecord.toModel() = PropertyUnit(
         id = id!!,
         propertyId = propertyId!!,
         unitNumber = unitNumber!!,
