@@ -1,24 +1,77 @@
 package com.ender.takehome.repository
 
+import com.ender.takehome.generated.tables.RentCharges.RENT_CHARGES
+import com.ender.takehome.generated.tables.records.RentChargesRecord
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
-import org.springframework.data.domain.Pageable
-import org.springframework.data.jpa.repository.EntityGraph
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Query
+import org.jooq.DSLContext
+import org.jooq.impl.DSL
+import org.springframework.stereotype.Component
 import java.time.LocalDate
+import java.time.ZoneOffset
 
-interface RentChargeRepository : JpaRepository<RentCharge, Long> {
+@Component
+class RentChargeRepository(private val dsl: DSLContext) {
 
-    @EntityGraph(attributePaths = ["lease"])
-    @Query("SELECT rc FROM RentCharge rc WHERE rc.lease.id = :leaseId AND (:startAfterId IS NULL OR rc.id > :startAfterId) ORDER BY rc.id")
-    fun findByLeaseIdCursor(leaseId: Long, startAfterId: Long?, pageable: Pageable): List<RentCharge>
+    fun findById(id: Long): RentCharge? =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.ID.eq(id))
+            .fetchOne()
+            ?.toModel()
 
-    @EntityGraph(attributePaths = ["lease"])
-    @Query("SELECT rc FROM RentCharge rc WHERE rc.lease.id = :leaseId AND rc.status = :status AND (:startAfterId IS NULL OR rc.id > :startAfterId) ORDER BY rc.id")
-    fun findByLeaseIdAndStatusCursor(leaseId: Long, status: RentChargeStatus, startAfterId: Long?, pageable: Pageable): List<RentCharge>
+    fun findByLeaseIdCursor(leaseId: Long, startAfterId: Long?, limit: Int): List<RentCharge> =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.LEASE_ID.eq(leaseId))
+            .and(cursorCondition(startAfterId))
+            .orderBy(RENT_CHARGES.ID)
+            .limit(limit)
+            .fetch()
+            .map { it.toModel() }
 
-    fun findByLeaseIdAndDueDate(leaseId: Long, dueDate: LocalDate): RentCharge?
+    fun findByLeaseIdAndStatusCursor(leaseId: Long, status: RentChargeStatus, startAfterId: Long?, limit: Int): List<RentCharge> =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.LEASE_ID.eq(leaseId))
+            .and(RENT_CHARGES.STATUS.eq(status.name))
+            .and(cursorCondition(startAfterId))
+            .orderBy(RENT_CHARGES.ID)
+            .limit(limit)
+            .fetch()
+            .map { it.toModel() }
 
-    fun findByStatus(status: RentChargeStatus): List<RentCharge>
+    fun findByLeaseIdAndDueDate(leaseId: Long, dueDate: LocalDate): RentCharge? =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.LEASE_ID.eq(leaseId))
+            .and(RENT_CHARGES.DUE_DATE.eq(dueDate))
+            .fetchOne()
+            ?.toModel()
+
+    fun save(charge: RentCharge): RentCharge {
+        if (charge.id == 0L) {
+            val record = dsl.newRecord(RENT_CHARGES).apply {
+                leaseId = charge.leaseId
+                amount = charge.amount
+                dueDate = charge.dueDate
+                status = charge.status.name
+            }
+            record.store()
+            return charge.copy(id = record.id!!)
+        }
+        dsl.update(RENT_CHARGES)
+            .set(RENT_CHARGES.STATUS, charge.status.name)
+            .where(RENT_CHARGES.ID.eq(charge.id))
+            .execute()
+        return charge
+    }
+
+    private fun cursorCondition(startAfterId: Long?) =
+        if (startAfterId != null) RENT_CHARGES.ID.gt(startAfterId) else DSL.noCondition()
+
+    private fun RentChargesRecord.toModel() = RentCharge(
+        id = id!!,
+        leaseId = leaseId!!,
+        amount = amount!!,
+        dueDate = dueDate!!,
+        status = RentChargeStatus.valueOf(status!!),
+        createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
+    )
 }

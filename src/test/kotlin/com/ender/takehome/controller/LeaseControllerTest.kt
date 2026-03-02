@@ -70,11 +70,7 @@ class LeaseControllerTest {
         fun leaseService(): LeaseService = mockk()
     }
 
-    private val pm = TestFixtures.propertyManager()
-    private val property = TestFixtures.property(pm)
-    private val unit = TestFixtures.unit(property)
-    private val tenant = TestFixtures.tenant()
-    private val lease = TestFixtures.lease(tenant, unit)
+    private val lease = TestFixtures.lease()
 
     private fun pmToken(): String = jwtService.generateToken(
         userId = 1L, email = "pm@test.com", role = "PROPERTY_MANAGER", tenantId = null, pmId = 1L

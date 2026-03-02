@@ -6,7 +6,6 @@ import com.ender.takehome.model.Lease
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.repository.RentChargeRepository
-import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -17,17 +16,17 @@ class RentChargeService(
 ) {
 
     fun getById(id: Long): RentCharge =
-        rentChargeRepository.findById(id).orElseThrow { ResourceNotFoundException("Rent charge not found: $id") }
+        rentChargeRepository.findById(id) ?: throw ResourceNotFoundException("Rent charge not found: $id")
 
     fun getByLeaseId(leaseId: Long, startAfterId: Long?, limit: Int): CursorPage<RentCharge> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = rentChargeRepository.findByLeaseIdCursor(leaseId, startAfterId, PageRequest.ofSize(sanitized + 1))
+        val items = rentChargeRepository.findByLeaseIdCursor(leaseId, startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
     fun getPendingByLeaseId(leaseId: Long, startAfterId: Long?, limit: Int): CursorPage<RentCharge> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = rentChargeRepository.findByLeaseIdAndStatusCursor(leaseId, RentChargeStatus.PENDING, startAfterId, PageRequest.ofSize(sanitized + 1))
+        val items = rentChargeRepository.findByLeaseIdAndStatusCursor(leaseId, RentChargeStatus.PENDING, startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
@@ -37,7 +36,7 @@ class RentChargeService(
         if (existing != null) return null
 
         val charge = RentCharge(
-            lease = lease,
+            leaseId = lease.id,
             amount = lease.rentAmount,
             dueDate = dueDate,
         )
@@ -47,7 +46,7 @@ class RentChargeService(
     @Transactional
     fun markPaid(chargeId: Long): RentCharge {
         val charge = getById(chargeId)
-        charge.status = RentChargeStatus.PAID
-        return rentChargeRepository.save(charge)
+        val updated = charge.copy(status = RentChargeStatus.PAID)
+        return rentChargeRepository.save(updated)
     }
 }

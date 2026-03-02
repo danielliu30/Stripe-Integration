@@ -8,18 +8,13 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
-import java.util.*
 
 class RentChargeServiceTest {
 
     private val rentChargeRepository = mockk<RentChargeRepository>()
     private val service = RentChargeService(rentChargeRepository)
 
-    private val pm = TestFixtures.propertyManager()
-    private val property = TestFixtures.property(pm)
-    private val unit = TestFixtures.unit(property)
-    private val tenant = TestFixtures.tenant()
-    private val lease = TestFixtures.lease(tenant, unit)
+    private val lease = TestFixtures.lease()
 
     @BeforeEach
     fun setUp() {
@@ -43,7 +38,7 @@ class RentChargeServiceTest {
     @Test
     fun `generateCharge returns null when charge already exists for that month`() {
         val dueDate = LocalDate.of(2025, 7, 1)
-        val existing = TestFixtures.rentCharge(lease, dueDate = dueDate)
+        val existing = TestFixtures.rentCharge(leaseId = lease.id, dueDate = dueDate)
         every { rentChargeRepository.findByLeaseIdAndDueDate(lease.id, dueDate) } returns existing
 
         val result = service.generateCharge(lease, dueDate)
@@ -54,8 +49,8 @@ class RentChargeServiceTest {
 
     @Test
     fun `markPaid updates charge status to PAID`() {
-        val charge = TestFixtures.rentCharge(lease)
-        every { rentChargeRepository.findById(charge.id) } returns Optional.of(charge)
+        val charge = TestFixtures.rentCharge(leaseId = lease.id)
+        every { rentChargeRepository.findById(charge.id) } returns charge
         every { rentChargeRepository.save(any()) } answers { firstArg() }
 
         val result = service.markPaid(charge.id)

@@ -16,12 +16,7 @@ class ManualPaymentServiceTest {
     private val rentChargeService = mockk<RentChargeService>()
     private val service = ManualPaymentService(manualPaymentRepository, rentChargeService)
 
-    private val pm = TestFixtures.propertyManager()
-    private val property = TestFixtures.property(pm)
-    private val unit = TestFixtures.unit(property)
-    private val tenant = TestFixtures.tenant()
-    private val lease = TestFixtures.lease(tenant, unit)
-    private val rentCharge = TestFixtures.rentCharge(lease)
+    private val rentCharge = TestFixtures.rentCharge()
 
     @BeforeEach
     fun setUp() {

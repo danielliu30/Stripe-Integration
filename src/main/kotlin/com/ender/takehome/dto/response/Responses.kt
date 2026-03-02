@@ -24,7 +24,7 @@ data class PropertyResponse(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(p: Property) = PropertyResponse(p.id, p.propertyManager.id, p.name, p.address, p.createdAt)
+        fun from(p: Property) = PropertyResponse(p.id, p.pmId, p.name, p.address, p.createdAt)
     }
 }
 
@@ -35,7 +35,7 @@ data class UnitResponse(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(u: ApartmentUnit) = UnitResponse(u.id, u.property.id, u.unitNumber, u.createdAt)
+        fun from(u: ApartmentUnit) = UnitResponse(u.id, u.propertyId, u.unitNumber, u.createdAt)
     }
 }
 
@@ -64,7 +64,7 @@ data class LeaseResponse(
 ) {
     companion object {
         fun from(l: Lease) = LeaseResponse(
-            l.id, l.tenant.id, l.unit.id, l.rentAmount, l.startDate, l.endDate, l.status, l.createdAt
+            l.id, l.tenantId, l.unitId, l.rentAmount, l.startDate, l.endDate, l.status, l.createdAt
         )
     }
 }
@@ -79,7 +79,7 @@ data class RentChargeResponse(
 ) {
     companion object {
         fun from(rc: RentCharge) = RentChargeResponse(
-            rc.id, rc.lease.id, rc.amount, rc.dueDate, rc.status, rc.createdAt
+            rc.id, rc.leaseId, rc.amount, rc.dueDate, rc.status, rc.createdAt
         )
     }
 }
@@ -95,7 +95,7 @@ data class ManualPaymentResponse(
 ) {
     companion object {
         fun from(mp: ManualPayment) = ManualPaymentResponse(
-            mp.id, mp.rentCharge.id, mp.amount, mp.paymentMethod, mp.notes, mp.recordedBy, mp.createdAt
+            mp.id, mp.rentChargeId, mp.amount, mp.paymentMethod, mp.notes, mp.recordedBy, mp.createdAt
         )
     }
 }

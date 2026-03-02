@@ -1,7 +1,6 @@
 package com.ender.takehome.controller
 
 import com.ender.takehome.config.JwtService
-import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.repository.UserRepository
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
@@ -44,8 +43,8 @@ class AuthController(
             userId = user.id,
             email = user.email,
             role = user.role.name,
-            tenantId = user.tenant?.id,
-            pmId = user.propertyManager?.id,
+            tenantId = user.tenantId,
+            pmId = user.pmId,
         )
 
         return LoginResponse(

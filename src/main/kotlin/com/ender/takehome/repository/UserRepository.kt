@@ -1,11 +1,29 @@
 package com.ender.takehome.repository
 
+import com.ender.takehome.generated.tables.Users.USERS
+import com.ender.takehome.generated.tables.records.UsersRecord
 import com.ender.takehome.model.User
-import org.springframework.data.jpa.repository.EntityGraph
-import org.springframework.data.jpa.repository.JpaRepository
+import com.ender.takehome.model.UserRole
+import org.jooq.DSLContext
+import org.springframework.stereotype.Component
+import java.time.ZoneOffset
 
-interface UserRepository : JpaRepository<User, Long> {
+@Component
+class UserRepository(private val dsl: DSLContext) {
 
-    @EntityGraph(attributePaths = ["tenant", "propertyManager"])
-    fun findByEmail(email: String): User?
+    fun findByEmail(email: String): User? =
+        dsl.selectFrom(USERS)
+            .where(USERS.EMAIL.eq(email))
+            .fetchOne()
+            ?.toModel()
+
+    private fun UsersRecord.toModel() = User(
+        id = id!!,
+        email = email!!,
+        passwordHash = passwordHash!!,
+        role = UserRole.valueOf(role!!),
+        tenantId = tenantId,
+        pmId = pmId,
+        createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
+    )
 }

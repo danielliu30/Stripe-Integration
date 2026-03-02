@@ -8,7 +8,6 @@ import com.ender.takehome.model.LeaseStatus
 import com.ender.takehome.repository.LeaseRepository
 import com.ender.takehome.repository.TenantRepository
 import com.ender.takehome.repository.UnitRepository
-import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -21,16 +20,16 @@ class LeaseService(
 
     fun getAll(startAfterId: Long?, limit: Int): CursorPage<Lease> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = leaseRepository.findAllCursor(startAfterId, PageRequest.ofSize(sanitized + 1))
+        val items = leaseRepository.findAllCursor(startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
     fun getById(id: Long): Lease =
-        leaseRepository.findById(id).orElseThrow { ResourceNotFoundException("Lease not found: $id") }
+        leaseRepository.findById(id) ?: throw ResourceNotFoundException("Lease not found: $id")
 
     fun getByTenantId(tenantId: Long, startAfterId: Long?, limit: Int): CursorPage<Lease> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = leaseRepository.findByTenantIdCursor(tenantId, startAfterId, PageRequest.ofSize(sanitized + 1))
+        val items = leaseRepository.findByTenantIdCursor(tenantId, startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
@@ -38,16 +37,16 @@ class LeaseService(
 
     @Transactional
     fun create(request: CreateLeaseRequest): Lease {
-        val tenant = tenantRepository.findById(request.tenantId)
-            .orElseThrow { ResourceNotFoundException("Tenant not found: ${request.tenantId}") }
-        val unit = unitRepository.findById(request.unitId)
-            .orElseThrow { ResourceNotFoundException("Unit not found: ${request.unitId}") }
+        tenantRepository.findById(request.tenantId)
+            ?: throw ResourceNotFoundException("Tenant not found: ${request.tenantId}")
+        unitRepository.findById(request.unitId)
+            ?: throw ResourceNotFoundException("Unit not found: ${request.unitId}")
 
         require(request.endDate.isAfter(request.startDate)) { "End date must be after start date" }
 
         val lease = Lease(
-            tenant = tenant,
-            unit = unit,
+            tenantId = request.tenantId,
+            unitId = request.unitId,
             rentAmount = request.rentAmount,
             startDate = request.startDate,
             endDate = request.endDate,

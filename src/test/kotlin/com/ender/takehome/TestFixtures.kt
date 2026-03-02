@@ -10,38 +10,44 @@ import java.time.LocalDate
 object TestFixtures {
 
     fun propertyManager(
+        id: Long = 1L,
         name: String = "Test PM",
         email: String = "pm@test.com",
-    ) = PropertyManager(name = name, email = email)
+    ) = PropertyManager(id = id, name = name, email = email)
 
     fun property(
-        propertyManager: PropertyManager,
+        id: Long = 1L,
+        pmId: Long = 1L,
         name: String = "Test Property",
         address: String = "123 Test St",
-    ) = Property(propertyManager = propertyManager, name = name, address = address)
+    ) = Property(id = id, pmId = pmId, name = name, address = address)
 
     fun unit(
-        property: Property,
+        id: Long = 1L,
+        propertyId: Long = 1L,
         unitNumber: String = "101",
-    ) = ApartmentUnit(property = property, unitNumber = unitNumber)
+    ) = ApartmentUnit(id = id, propertyId = propertyId, unitNumber = unitNumber)
 
     fun tenant(
+        id: Long = 1L,
         firstName: String = "Test",
         lastName: String = "Tenant",
         email: String = "test@tenant.com",
         phone: String? = "555-0100",
-    ) = Tenant(firstName = firstName, lastName = lastName, email = email, phone = phone)
+    ) = Tenant(id = id, firstName = firstName, lastName = lastName, email = email, phone = phone)
 
     fun lease(
-        tenant: Tenant,
-        unit: ApartmentUnit,
+        id: Long = 1L,
+        tenantId: Long = 1L,
+        unitId: Long = 1L,
         rentAmount: BigDecimal = BigDecimal("2000.00"),
         startDate: LocalDate = LocalDate.now().minusMonths(6),
         endDate: LocalDate = LocalDate.now().plusMonths(6),
         status: LeaseStatus = LeaseStatus.ACTIVE,
     ) = Lease(
-        tenant = tenant,
-        unit = unit,
+        id = id,
+        tenantId = tenantId,
+        unitId = unitId,
         rentAmount = rentAmount,
         startDate = startDate,
         endDate = endDate,
@@ -49,12 +55,14 @@ object TestFixtures {
     )
 
     fun rentCharge(
-        lease: Lease,
-        amount: BigDecimal = lease.rentAmount,
+        id: Long = 1L,
+        leaseId: Long = 1L,
+        amount: BigDecimal = BigDecimal("2000.00"),
         dueDate: LocalDate = LocalDate.now().withDayOfMonth(1),
         status: RentChargeStatus = RentChargeStatus.PENDING,
     ) = RentCharge(
-        lease = lease,
+        id = id,
+        leaseId = leaseId,
         amount = amount,
         dueDate = dueDate,
         status = status,
