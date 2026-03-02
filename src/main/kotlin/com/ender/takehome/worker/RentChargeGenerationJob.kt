@@ -6,33 +6,34 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.LocalDate
 
-/**
- * Background job that generates rent charges for active leases.
- *
- * Expected payload:
- *   { "dueDate": "2025-07-01" }
- *
- * If no dueDate is provided, defaults to the 1st of the current month.
- */
-@Component("GENERATE_RENT_CHARGES")
+data class RentChargeGenerationParams(
+    val dueDate: LocalDate,
+)
+
+@Component
 class RentChargeGenerationJob(
     private val leaseService: LeaseService,
     private val rentChargeService: RentChargeService,
-) : JobHandler {
+) : BackgroundJob<RentChargeGenerationParams> {
 
     private val log = LoggerFactory.getLogger(RentChargeGenerationJob::class.java)
 
-    override fun handle(payload: Map<String, Any>) {
-        val dueDate = (payload["dueDate"] as? String)
+    override val type = BackgroundJobType.GENERATE_RENT_CHARGES
+
+    override fun deserialize(params: Map<String, Any>): RentChargeGenerationParams {
+        val dueDate = (params["dueDate"] as? String)
             ?.let { LocalDate.parse(it) }
             ?: LocalDate.now().withDayOfMonth(1)
+        return RentChargeGenerationParams(dueDate = dueDate)
+    }
 
+    override fun process(params: RentChargeGenerationParams) {
         val activeLeases = leaseService.getActiveLeases()
-        log.info("Generating rent charges for ${activeLeases.size} active leases, due date: $dueDate")
+        log.info("Generating rent charges for ${activeLeases.size} active leases, due date: ${params.dueDate}")
 
         var created = 0
         for (lease in activeLeases) {
-            val charge = rentChargeService.generateCharge(lease, dueDate)
+            val charge = rentChargeService.generateCharge(lease, params.dueDate)
             if (charge != null) created++
         }
 

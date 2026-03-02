@@ -11,24 +11,22 @@ import software.amazon.awssdk.services.sqs.SqsClient
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest
 
-data class JobMessage(
-    val jobType: String = "",
-    val payload: Map<String, Any> = emptyMap(),
-)
-
 @Component
 @EnableScheduling
 @ConditionalOnProperty("worker.enabled", havingValue = "true")
 class SqsWorker(
     private val sqsClient: SqsClient,
     private val objectMapper: ObjectMapper,
-    private val jobHandlers: Map<String, JobHandler>,
+    backgroundJobs: List<BackgroundJob<*>>,
     @Value("\${aws.sqs.queue-url}") private val queueUrl: String,
     @Value("\${worker.max-messages}") private val maxMessages: Int,
     @Value("\${worker.visibility-timeout-seconds}") private val visibilityTimeout: Int,
 ) {
 
     private val log = LoggerFactory.getLogger(SqsWorker::class.java)
+
+    private val handlers: Map<BackgroundJobType, BackgroundJob<*>> =
+        backgroundJobs.associateBy { it.type }
 
     @Scheduled(fixedDelayString = "\${worker.poll-interval-ms}")
     fun poll() {
@@ -42,16 +40,16 @@ class SqsWorker(
         val messages = sqsClient.receiveMessage(request).messages()
         for (message in messages) {
             try {
-                val job = objectMapper.readValue(message.body(), JobMessage::class.java)
-                log.info("Processing job: type=${job.jobType}")
+                val job = objectMapper.readValue(message.body(), BackgroundJobRequest::class.java)
+                log.info("Processing job: type=${job.type}")
 
-                val handler = jobHandlers[job.jobType]
+                val handler = handlers[job.type]
                 if (handler != null) {
-                    handler.handle(job.payload)
+                    handler.handleRaw(job.params)
                     deleteMessage(message.receiptHandle())
-                    log.info("Job completed: type=${job.jobType}")
+                    log.info("Job completed: type=${job.type}")
                 } else {
-                    log.warn("No handler for job type: ${job.jobType}")
+                    log.warn("No handler registered for job type: ${job.type}")
                 }
             } catch (e: Exception) {
                 log.error("Failed to process message: ${message.messageId()}", e)
@@ -67,8 +65,4 @@ class SqsWorker(
                 .build()
         )
     }
-}
-
-interface JobHandler {
-    fun handle(payload: Map<String, Any>)
 }
