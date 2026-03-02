@@ -1,11 +1,10 @@
-package com.ender.takehome.controller
+package com.ender.takehome.leasing
 
 import com.ender.takehome.TestFixtures
 import com.ender.takehome.config.JwtAuthenticationFilter
 import com.ender.takehome.config.JwtService
 import com.ender.takehome.dto.request.CreateLeaseRequest
 import com.ender.takehome.dto.response.CursorPage
-import com.ender.takehome.service.LeaseService
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.mockk.every
 import io.mockk.mockk
@@ -28,9 +27,9 @@ import com.ender.takehome.model.UserRole
 import java.math.BigDecimal
 import java.time.LocalDate
 
-@WebMvcTest(LeaseController::class)
-@Import(LeaseControllerTest.TestSecurityConfig::class)
-class LeaseControllerTest {
+@WebMvcTest(LeaseApi::class)
+@Import(LeaseApiTest.TestSecurityConfig::class)
+class LeaseApiTest {
 
     @Autowired
     private lateinit var mockMvc: MockMvc
@@ -39,7 +38,7 @@ class LeaseControllerTest {
     private lateinit var objectMapper: ObjectMapper
 
     @Autowired
-    private lateinit var leaseService: LeaseService
+    private lateinit var leaseModule: LeaseModule
 
     @Autowired
     private lateinit var jwtService: JwtService
@@ -68,7 +67,7 @@ class LeaseControllerTest {
             .build()
 
         @Bean
-        fun leaseService(): LeaseService = mockk()
+        fun leaseModule(): LeaseModule = mockk()
     }
 
     private val lease = TestFixtures.lease()
@@ -79,7 +78,7 @@ class LeaseControllerTest {
 
     @Test
     fun `GET leases returns cursor page for authenticated PM`() {
-        every { leaseService.getAll(null, any()) } returns CursorPage(listOf(lease), hasMore = false)
+        every { leaseModule.getAll(null, any()) } returns CursorPage(listOf(lease), hasMore = false)
 
         mockMvc.get("/api/leases") {
             header("Authorization", "Bearer ${pmToken()}")
@@ -101,7 +100,7 @@ class LeaseControllerTest {
             endDate = LocalDate.of(2026, 1, 1),
         )
 
-        every { leaseService.create(any()) } returns lease
+        every { leaseModule.create(any()) } returns lease
 
         mockMvc.post("/api/leases") {
             contentType = MediaType.APPLICATION_JSON

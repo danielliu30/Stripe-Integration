@@ -1,46 +1,43 @@
-package com.ender.takehome.service
+package com.ender.takehome.leasing
 
 import com.ender.takehome.dto.request.CreateLeaseRequest
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.model.Lease
 import com.ender.takehome.model.LeaseStatus
-import com.ender.takehome.repository.LeaseRepository
-import com.ender.takehome.repository.TenantRepository
-import com.ender.takehome.repository.UnitRepository
+import com.ender.takehome.property.PropertyModule
+import com.ender.takehome.tenant.TenantModule
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
-class LeaseService(
-    private val leaseRepository: LeaseRepository,
-    private val tenantRepository: TenantRepository,
-    private val unitRepository: UnitRepository,
+class LeaseModule(
+    private val dataAccess: LeaseDataAccess,
+    private val tenantModule: TenantModule,
+    private val propertyModule: PropertyModule,
 ) {
 
     fun getAll(startAfterId: Long?, limit: Int): CursorPage<Lease> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = leaseRepository.findAllCursor(startAfterId, sanitized + 1)
+        val items = dataAccess.findAllCursor(startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
     fun getById(id: Long): Lease =
-        leaseRepository.findById(id) ?: throw ResourceNotFoundException("Lease not found: $id")
+        dataAccess.findById(id) ?: throw ResourceNotFoundException("Lease not found: $id")
 
     fun getByTenantId(tenantId: Long, startAfterId: Long?, limit: Int): CursorPage<Lease> {
         val sanitized = CursorPage.sanitizeLimit(limit)
-        val items = leaseRepository.findByTenantIdCursor(tenantId, startAfterId, sanitized + 1)
+        val items = dataAccess.findByTenantIdCursor(tenantId, startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
-    fun getActiveLeases(): List<Lease> = leaseRepository.findByStatus(LeaseStatus.ACTIVE)
+    fun getActiveLeases(): List<Lease> = dataAccess.findByStatus(LeaseStatus.ACTIVE)
 
     @Transactional
     fun create(request: CreateLeaseRequest): Lease {
-        tenantRepository.findById(request.tenantId)
-            ?: throw ResourceNotFoundException("Tenant not found: ${request.tenantId}")
-        unitRepository.findById(request.unitId)
-            ?: throw ResourceNotFoundException("Unit not found: ${request.unitId}")
+        tenantModule.getById(request.tenantId)
+        propertyModule.getUnit(request.unitId)
 
         require(request.endDate.isAfter(request.startDate)) { "End date must be after start date" }
 
@@ -51,6 +48,6 @@ class LeaseService(
             startDate = request.startDate,
             endDate = request.endDate,
         )
-        return leaseRepository.save(lease)
+        return dataAccess.save(lease)
     }
 }

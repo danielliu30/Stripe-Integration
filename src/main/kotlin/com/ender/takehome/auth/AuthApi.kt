@@ -1,13 +1,11 @@
-package com.ender.takehome.controller
+package com.ender.takehome.auth
 
 import com.ender.takehome.config.JwtService
 import com.ender.takehome.model.UserRole
-import com.ender.takehome.repository.UserRepository
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import org.springframework.http.HttpStatus
-import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 
@@ -25,15 +23,15 @@ data class LoginResponse(
 
 @RestController
 @RequestMapping("/api/auth")
-class AuthController(
-    private val userRepository: UserRepository,
-    private val passwordEncoder: PasswordEncoder,
+class AuthApi(
+    private val dataAccess: AuthDataAccess,
+    private val passwordEncoder: org.springframework.security.crypto.password.PasswordEncoder,
     private val jwtService: JwtService,
 ) {
 
     @PostMapping("/login")
     fun login(@Valid @RequestBody request: LoginRequest): LoginResponse {
-        val user = userRepository.findByEmail(request.email)
+        val user = dataAccess.findByEmail(request.email)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials")
 
         if (!passwordEncoder.matches(request.password, user.passwordHash)) {

@@ -1,4 +1,4 @@
-package com.ender.takehome.repository
+package com.ender.takehome.tenant
 
 import com.ender.takehome.generated.tables.Tenants.TENANTS
 import com.ender.takehome.generated.tables.records.TenantsRecord
@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component
 import java.time.ZoneOffset
 
 @Component
-class TenantRepository(private val dsl: DSLContext) {
+class TenantDataAccess(private val dsl: DSLContext) {
 
     fun findById(id: Long): Tenant? =
         dsl.selectFrom(TENANTS)

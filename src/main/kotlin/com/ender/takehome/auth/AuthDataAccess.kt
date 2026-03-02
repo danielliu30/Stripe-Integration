@@ -1,4 +1,4 @@
-package com.ender.takehome.repository
+package com.ender.takehome.auth
 
 import com.ender.takehome.generated.tables.Users.USERS
 import com.ender.takehome.generated.tables.records.UsersRecord
@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component
 import java.time.ZoneOffset
 
 @Component
-class UserRepository(private val dsl: DSLContext) {
+class AuthDataAccess(private val dsl: DSLContext) {
 
     fun findByEmail(email: String): User? =
         dsl.selectFrom(USERS)

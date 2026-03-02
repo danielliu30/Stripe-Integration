@@ -1,7 +1,7 @@
 package com.ender.takehome.worker
 
-import com.ender.takehome.service.LeaseService
-import com.ender.takehome.service.RentChargeService
+import com.ender.takehome.leasing.LeaseModule
+import com.ender.takehome.ledger.LedgerModule
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.LocalDate
@@ -12,8 +12,8 @@ data class RentChargeGenerationParams(
 
 @Component
 class RentChargeGenerationJob(
-    private val leaseService: LeaseService,
-    private val rentChargeService: RentChargeService,
+    private val leaseModule: LeaseModule,
+    private val ledgerModule: LedgerModule,
 ) : BackgroundJob<RentChargeGenerationParams> {
 
     private val log = LoggerFactory.getLogger(RentChargeGenerationJob::class.java)
@@ -28,12 +28,12 @@ class RentChargeGenerationJob(
     }
 
     override fun process(params: RentChargeGenerationParams) {
-        val activeLeases = leaseService.getActiveLeases()
+        val activeLeases = leaseModule.getActiveLeases()
         log.info("Generating rent charges for ${activeLeases.size} active leases, due date: ${params.dueDate}")
 
         var created = 0
         for (lease in activeLeases) {
-            val charge = rentChargeService.generateCharge(lease, params.dueDate)
+            val charge = ledgerModule.generateCharge(lease, params.dueDate)
             if (charge != null) created++
         }
 
