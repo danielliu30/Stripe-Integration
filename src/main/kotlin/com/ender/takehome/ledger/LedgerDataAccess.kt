@@ -1,10 +1,10 @@
 package com.ender.takehome.ledger
 
-import com.ender.takehome.generated.tables.ManualPayments.MANUAL_PAYMENTS
+import com.ender.takehome.generated.tables.Payments.PAYMENTS
 import com.ender.takehome.generated.tables.RentCharges.RENT_CHARGES
-import com.ender.takehome.generated.tables.records.ManualPaymentsRecord
+import com.ender.takehome.generated.tables.records.PaymentsRecord
 import com.ender.takehome.generated.tables.records.RentChargesRecord
-import com.ender.takehome.model.ManualPayment
+import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
@@ -69,20 +69,20 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         return charge
     }
 
-    // --- ManualPayment ---
+    // --- Payment ---
 
-    fun findPaymentsByRentChargeIdCursor(rentChargeId: Long, startAfterId: Long?, limit: Int): List<ManualPayment> =
-        dsl.selectFrom(MANUAL_PAYMENTS)
-            .where(MANUAL_PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
+    fun findPaymentsByRentChargeIdCursor(rentChargeId: Long, startAfterId: Long?, limit: Int): List<Payment> =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
             .and(paymentCursorCondition(startAfterId))
-            .orderBy(MANUAL_PAYMENTS.ID)
+            .orderBy(PAYMENTS.ID)
             .limit(limit)
             .fetch()
             .map { it.toModel() }
 
-    fun savePayment(payment: ManualPayment): ManualPayment {
+    fun savePayment(payment: Payment): Payment {
         if (payment.id == 0L) {
-            val record = dsl.newRecord(MANUAL_PAYMENTS).apply {
+            val record = dsl.newRecord(PAYMENTS).apply {
                 rentChargeId = payment.rentChargeId
                 amount = payment.amount
                 paymentMethod = payment.paymentMethod.name
@@ -101,7 +101,7 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         if (startAfterId != null) RENT_CHARGES.ID.gt(startAfterId) else DSL.noCondition()
 
     private fun paymentCursorCondition(startAfterId: Long?) =
-        if (startAfterId != null) MANUAL_PAYMENTS.ID.gt(startAfterId) else DSL.noCondition()
+        if (startAfterId != null) PAYMENTS.ID.gt(startAfterId) else DSL.noCondition()
 
     // --- Record mappers ---
 
@@ -114,7 +114,7 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
     )
 
-    private fun ManualPaymentsRecord.toModel() = ManualPayment(
+    private fun PaymentsRecord.toModel() = Payment(
         id = id!!,
         rentChargeId = rentChargeId!!,
         amount = amount!!,

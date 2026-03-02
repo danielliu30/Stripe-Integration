@@ -1,10 +1,10 @@
 package com.ender.takehome.ledger
 
-import com.ender.takehome.dto.request.RecordManualPaymentRequest
+import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.model.Lease
-import com.ender.takehome.model.ManualPayment
+import com.ender.takehome.model.Payment
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import org.springframework.stereotype.Service
@@ -42,18 +42,18 @@ class LedgerModule(private val dataAccess: LedgerDataAccess) {
         return dataAccess.saveCharge(charge)
     }
 
-    fun getPaymentsByRentChargeId(rentChargeId: Long, startAfterId: Long?, limit: Int): CursorPage<ManualPayment> {
+    fun getPaymentsByRentChargeId(rentChargeId: Long, startAfterId: Long?, limit: Int): CursorPage<Payment> {
         val sanitized = CursorPage.sanitizeLimit(limit)
         val items = dataAccess.findPaymentsByRentChargeIdCursor(rentChargeId, startAfterId, sanitized + 1)
         return CursorPage.of(items, sanitized)
     }
 
     @Transactional
-    fun recordPayment(request: RecordManualPaymentRequest): ManualPayment {
+    fun recordPayment(request: RecordPaymentRequest): Payment {
         val charge = dataAccess.findChargeById(request.rentChargeId)
             ?: throw ResourceNotFoundException("Rent charge not found: ${request.rentChargeId}")
 
-        val payment = ManualPayment(
+        val payment = Payment(
             rentChargeId = charge.id,
             amount = request.amount,
             paymentMethod = request.paymentMethod,

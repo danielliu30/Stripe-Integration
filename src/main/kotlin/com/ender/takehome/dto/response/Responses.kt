@@ -84,7 +84,7 @@ data class RentChargeResponse(
     }
 }
 
-data class ManualPaymentResponse(
+data class PaymentResponse(
     val id: Long,
     val rentChargeId: Long,
     val amount: BigDecimal,
@@ -94,8 +94,8 @@ data class ManualPaymentResponse(
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(mp: ManualPayment) = ManualPaymentResponse(
-            mp.id, mp.rentChargeId, mp.amount, mp.paymentMethod, mp.notes, mp.recordedBy, mp.createdAt
+        fun from(p: Payment) = PaymentResponse(
+            p.id, p.rentChargeId, p.amount, p.paymentMethod, p.notes, p.recordedBy, p.createdAt
         )
     }
 }

@@ -1,8 +1,8 @@
 package com.ender.takehome.ledger
 
-import com.ender.takehome.dto.request.RecordManualPaymentRequest
+import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
-import com.ender.takehome.dto.response.ManualPaymentResponse
+import com.ender.takehome.dto.response.PaymentResponse
 import com.ender.takehome.dto.response.RentChargeResponse
 import com.ender.takehome.model.RentChargeStatus
 import jakarta.validation.Valid
@@ -46,20 +46,20 @@ class LedgerApi(private val ledgerModule: LedgerModule) {
 
     // --- Manual Payments ---
 
-    @GetMapping("/api/manual-payments", params = ["rentChargeId"])
+    @GetMapping("/api/payments", params = ["rentChargeId"])
     @PreAuthorize("hasRole('PROPERTY_MANAGER')")
     fun getPaymentsByRentCharge(
         @RequestParam rentChargeId: Long,
         @RequestParam(required = false) startAfterId: Long?,
         @RequestParam(defaultValue = "20") limit: Int,
-    ): CursorPage<ManualPaymentResponse> {
+    ): CursorPage<PaymentResponse> {
         val page = ledgerModule.getPaymentsByRentChargeId(rentChargeId, startAfterId, limit)
-        return CursorPage(page.content.map { ManualPaymentResponse.from(it) }, page.hasMore)
+        return CursorPage(page.content.map { PaymentResponse.from(it) }, page.hasMore)
     }
 
-    @PostMapping("/api/manual-payments")
+    @PostMapping("/api/payments")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('PROPERTY_MANAGER')")
-    fun recordPayment(@Valid @RequestBody request: RecordManualPaymentRequest): ManualPaymentResponse =
-        ManualPaymentResponse.from(ledgerModule.recordPayment(request))
+    fun recordPayment(@Valid @RequestBody request: RecordPaymentRequest): PaymentResponse =
+        PaymentResponse.from(ledgerModule.recordPayment(request))
 }

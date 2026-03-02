@@ -5,7 +5,7 @@ import java.time.Instant
 
 enum class PaymentMethod { CASH, CHECK, OTHER }
 
-data class ManualPayment(
+data class Payment(
     val id: Long = 0,
     val rentChargeId: Long,
     val amount: BigDecimal,

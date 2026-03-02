@@ -1,7 +1,7 @@
 package com.ender.takehome.ledger
 
 import com.ender.takehome.TestFixtures
-import com.ender.takehome.dto.request.RecordManualPaymentRequest
+import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.model.PaymentMethod
 import com.ender.takehome.model.RentChargeStatus
 import io.mockk.*
@@ -52,7 +52,7 @@ class LedgerModuleTest {
 
     @Test
     fun `recordPayment creates payment and marks charge as paid`() {
-        val request = RecordManualPaymentRequest(
+        val request = RecordPaymentRequest(
             rentChargeId = rentCharge.id,
             amount = BigDecimal("2000.00"),
             paymentMethod = PaymentMethod.CHECK,
