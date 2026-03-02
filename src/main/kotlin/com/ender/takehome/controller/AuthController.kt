@@ -1,6 +1,7 @@
 package com.ender.takehome.controller
 
 import com.ender.takehome.config.JwtService
+import com.ender.takehome.model.UserRole
 import com.ender.takehome.repository.UserRepository
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
@@ -19,7 +20,7 @@ data class LoginResponse(
     val token: String,
     val userId: Long,
     val email: String,
-    val role: String,
+    val role: UserRole,
 )
 
 @RestController
@@ -42,7 +43,7 @@ class AuthController(
         val token = jwtService.generateToken(
             userId = user.id,
             email = user.email,
-            role = user.role.name,
+            role = user.role,
             tenantId = user.tenantId,
             pmId = user.pmId,
         )
@@ -51,7 +52,7 @@ class AuthController(
             token = token,
             userId = user.id,
             email = user.email,
-            role = user.role.name,
+            role = user.role,
         )
     }
 }

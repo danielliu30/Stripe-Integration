@@ -24,6 +24,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import com.ender.takehome.model.UserRole
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -73,7 +74,7 @@ class LeaseControllerTest {
     private val lease = TestFixtures.lease()
 
     private fun pmToken(): String = jwtService.generateToken(
-        userId = 1L, email = "pm@test.com", role = "PROPERTY_MANAGER", tenantId = null, pmId = 1L
+        userId = 1L, email = "pm@test.com", role = UserRole.PROPERTY_MANAGER, tenantId = null, pmId = 1L
     )
 
     @Test

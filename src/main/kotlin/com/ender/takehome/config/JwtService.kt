@@ -1,5 +1,6 @@
 package com.ender.takehome.config
 
+import com.ender.takehome.model.UserRole
 import io.jsonwebtoken.Claims
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
@@ -16,12 +17,12 @@ class JwtService(
 
     private val key: SecretKey = Keys.hmacShaKeyFor(secret.toByteArray())
 
-    fun generateToken(userId: Long, email: String, role: String, tenantId: Long?, pmId: Long?): String {
+    fun generateToken(userId: Long, email: String, role: UserRole, tenantId: Long?, pmId: Long?): String {
         val now = Date()
         val builder = Jwts.builder()
             .subject(email)
             .claim("userId", userId)
-            .claim("role", role)
+            .claim("role", role.name)
             .issuedAt(now)
             .expiration(Date(now.time + expirationMs))
             .signWith(key)
