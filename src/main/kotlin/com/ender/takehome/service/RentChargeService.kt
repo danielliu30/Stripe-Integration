@@ -1,12 +1,12 @@
 package com.ender.takehome.service
 
+import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.model.Lease
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.repository.RentChargeRepository
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -19,16 +19,18 @@ class RentChargeService(
     fun getById(id: Long): RentCharge =
         rentChargeRepository.findById(id).orElseThrow { ResourceNotFoundException("Rent charge not found: $id") }
 
-    fun getByLeaseId(leaseId: Long, pageable: Pageable): Page<RentCharge> =
-        rentChargeRepository.findByLeaseId(leaseId, pageable)
+    fun getByLeaseId(leaseId: Long, startAfterId: Long?, limit: Int): CursorPage<RentCharge> {
+        val sanitized = CursorPage.sanitizeLimit(limit)
+        val items = rentChargeRepository.findByLeaseIdCursor(leaseId, startAfterId, PageRequest.ofSize(sanitized + 1))
+        return CursorPage.of(items, sanitized)
+    }
 
-    fun getPendingByLeaseId(leaseId: Long, pageable: Pageable): Page<RentCharge> =
-        rentChargeRepository.findByLeaseIdAndStatus(leaseId, RentChargeStatus.PENDING, pageable)
+    fun getPendingByLeaseId(leaseId: Long, startAfterId: Long?, limit: Int): CursorPage<RentCharge> {
+        val sanitized = CursorPage.sanitizeLimit(limit)
+        val items = rentChargeRepository.findByLeaseIdAndStatusCursor(leaseId, RentChargeStatus.PENDING, startAfterId, PageRequest.ofSize(sanitized + 1))
+        return CursorPage.of(items, sanitized)
+    }
 
-    /**
-     * Generate a rent charge for a lease for the given month.
-     * Returns null if a charge already exists for that month.
-     */
     @Transactional
     fun generateCharge(lease: Lease, dueDate: LocalDate): RentCharge? {
         val existing = rentChargeRepository.findByLeaseIdAndDueDate(lease.id, dueDate)

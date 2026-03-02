@@ -1,14 +1,14 @@
 package com.ender.takehome.service
 
 import com.ender.takehome.dto.request.CreateLeaseRequest
+import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.model.Lease
 import com.ender.takehome.model.LeaseStatus
 import com.ender.takehome.repository.LeaseRepository
 import com.ender.takehome.repository.TenantRepository
 import com.ender.takehome.repository.UnitRepository
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -19,13 +19,20 @@ class LeaseService(
     private val unitRepository: UnitRepository,
 ) {
 
-    fun getAll(pageable: Pageable): Page<Lease> = leaseRepository.findAll(pageable)
+    fun getAll(startAfterId: Long?, limit: Int): CursorPage<Lease> {
+        val sanitized = CursorPage.sanitizeLimit(limit)
+        val items = leaseRepository.findAllCursor(startAfterId, PageRequest.ofSize(sanitized + 1))
+        return CursorPage.of(items, sanitized)
+    }
 
     fun getById(id: Long): Lease =
         leaseRepository.findById(id).orElseThrow { ResourceNotFoundException("Lease not found: $id") }
 
-    fun getByTenantId(tenantId: Long, pageable: Pageable): Page<Lease> =
-        leaseRepository.findByTenantId(tenantId, pageable)
+    fun getByTenantId(tenantId: Long, startAfterId: Long?, limit: Int): CursorPage<Lease> {
+        val sanitized = CursorPage.sanitizeLimit(limit)
+        val items = leaseRepository.findByTenantIdCursor(tenantId, startAfterId, PageRequest.ofSize(sanitized + 1))
+        return CursorPage.of(items, sanitized)
+    }
 
     fun getActiveLeases(): List<Lease> = leaseRepository.findByStatus(LeaseStatus.ACTIVE)
 

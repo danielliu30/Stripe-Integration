@@ -4,6 +4,7 @@ import com.ender.takehome.TestFixtures
 import com.ender.takehome.config.JwtAuthenticationFilter
 import com.ender.takehome.config.JwtService
 import com.ender.takehome.dto.request.CreateLeaseRequest
+import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.service.LeaseService
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.mockk.every
@@ -14,8 +15,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
-import org.springframework.data.domain.PageImpl
-import org.springframework.data.domain.Pageable
 import org.springframework.http.MediaType
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -82,8 +81,8 @@ class LeaseControllerTest {
     )
 
     @Test
-    fun `GET leases returns paginated list for authenticated PM`() {
-        every { leaseService.getAll(any<Pageable>()) } returns PageImpl(listOf(lease))
+    fun `GET leases returns cursor page for authenticated PM`() {
+        every { leaseService.getAll(null, any()) } returns CursorPage(listOf(lease), hasMore = false)
 
         mockMvc.get("/api/leases") {
             header("Authorization", "Bearer ${pmToken()}")
@@ -91,7 +90,7 @@ class LeaseControllerTest {
             status { isOk() }
             jsonPath("$.content[0].rentAmount") { value(2000.0) }
             jsonPath("$.content[0].status") { value("ACTIVE") }
-            jsonPath("$.totalElements") { value(1) }
+            jsonPath("$.hasMore") { value(false) }
         }
     }
 

@@ -89,14 +89,14 @@ curl http://localhost:8080/api/leases \
 
 ## Pagination
 
-All list endpoints return paginated responses. Use query parameters to control pagination:
+All list endpoints use cursor-based pagination with `startAfterId` and `limit` query parameters. This avoids the performance and consistency problems of offset-based pagination.
 
 ```bash
-# Default: page 0, size 20
+# First page (default limit: 20)
 curl http://localhost:8080/api/tenants -H 'Authorization: Bearer <token>'
 
-# Custom page and size
-curl 'http://localhost:8080/api/tenants?page=0&size=10&sort=createdAt,desc' \
+# Next page — pass the last item's ID as startAfterId
+curl 'http://localhost:8080/api/tenants?startAfterId=20&limit=10' \
   -H 'Authorization: Bearer <token>'
 ```
 
@@ -104,10 +104,7 @@ Response format:
 ```json
 {
   "content": [...],
-  "totalElements": 42,
-  "totalPages": 3,
-  "size": 20,
-  "number": 0
+  "hasMore": true
 }
 ```
 

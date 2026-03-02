@@ -1,10 +1,10 @@
 package com.ender.takehome.service
 
 import com.ender.takehome.dto.request.RecordManualPaymentRequest
+import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.model.ManualPayment
 import com.ender.takehome.repository.ManualPaymentRepository
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -14,8 +14,11 @@ class ManualPaymentService(
     private val rentChargeService: RentChargeService,
 ) {
 
-    fun getByRentChargeId(rentChargeId: Long, pageable: Pageable): Page<ManualPayment> =
-        manualPaymentRepository.findByRentChargeId(rentChargeId, pageable)
+    fun getByRentChargeId(rentChargeId: Long, startAfterId: Long?, limit: Int): CursorPage<ManualPayment> {
+        val sanitized = CursorPage.sanitizeLimit(limit)
+        val items = manualPaymentRepository.findByRentChargeIdCursor(rentChargeId, startAfterId, PageRequest.ofSize(sanitized + 1))
+        return CursorPage.of(items, sanitized)
+    }
 
     @Transactional
     fun recordPayment(request: RecordManualPaymentRequest): ManualPayment {

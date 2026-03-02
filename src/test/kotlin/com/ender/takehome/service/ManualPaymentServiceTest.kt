@@ -8,8 +8,6 @@ import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.data.domain.PageImpl
-import org.springframework.data.domain.Pageable
 import java.math.BigDecimal
 
 class ManualPaymentServiceTest {

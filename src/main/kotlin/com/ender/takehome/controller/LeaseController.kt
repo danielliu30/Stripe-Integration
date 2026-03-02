@@ -2,12 +2,11 @@ package com.ender.takehome.controller
 
 import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.CreateLeaseRequest
+import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.dto.response.LeaseResponse
 import com.ender.takehome.model.UserRole
 import com.ender.takehome.service.LeaseService
 import jakarta.validation.Valid
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
@@ -17,13 +16,17 @@ import org.springframework.web.bind.annotation.*
 class LeaseController(private val leaseService: LeaseService) {
 
     @GetMapping
-    fun list(pageable: Pageable): Page<LeaseResponse> {
+    fun list(
+        @RequestParam(required = false) startAfterId: Long?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): CursorPage<LeaseResponse> {
         val principal = UserPrincipal.current()
-        return if (principal.role == UserRole.TENANT && principal.tenantId != null) {
-            leaseService.getByTenantId(principal.tenantId, pageable)
+        val page = if (principal.role == UserRole.TENANT && principal.tenantId != null) {
+            leaseService.getByTenantId(principal.tenantId, startAfterId, limit)
         } else {
-            leaseService.getAll(pageable)
-        }.map { LeaseResponse.from(it) }
+            leaseService.getAll(startAfterId, limit)
+        }
+        return CursorPage(page.content.map { LeaseResponse.from(it) }, page.hasMore)
     }
 
     @GetMapping("/{id}")
@@ -31,8 +34,14 @@ class LeaseController(private val leaseService: LeaseService) {
 
     @GetMapping(params = ["tenantId"])
     @PreAuthorize("hasRole('PROPERTY_MANAGER')")
-    fun getByTenant(@RequestParam tenantId: Long, pageable: Pageable): Page<LeaseResponse> =
-        leaseService.getByTenantId(tenantId, pageable).map { LeaseResponse.from(it) }
+    fun getByTenant(
+        @RequestParam tenantId: Long,
+        @RequestParam(required = false) startAfterId: Long?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): CursorPage<LeaseResponse> {
+        val page = leaseService.getByTenantId(tenantId, startAfterId, limit)
+        return CursorPage(page.content.map { LeaseResponse.from(it) }, page.hasMore)
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
