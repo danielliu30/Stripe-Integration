@@ -67,6 +67,50 @@ class CardPaymentIntegrationTest : IntegrationTestBase() {
         }
     }
 
+    @Test
+    fun `duplicate setup intent succeeded webhooks create only one saved card`() {
+        val tenantToken = login("alice.johnson@email.com")
+
+        mockMvc.post("/api/cards/checkout-session") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isCreated() }
+        }
+
+        val event = mapOf(
+            "id" to "evt_setup_duplicate",
+            "object" to "event",
+            "api_version" to "2026-06-24.dahlia",
+            "type" to "setup_intent.succeeded",
+            "data" to mapOf(
+                "object" to mapOf(
+                    "id" to "seti_duplicate",
+                    "object" to "setup_intent",
+                    "customer" to "cus_test_1",
+                    "payment_method" to "pm_duplicate",
+                )
+            ),
+        )
+        postWebhook(event)
+
+        val cardsAfterFirst = mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andReturn()
+        val firstCardContent = objectMapper.readTree(cardsAfterFirst.response.contentAsString).get("content")
+        val cardsAfterFirstCount = firstCardContent.size()
+        assert(cardsAfterFirstCount > 0) { "Expected at least one saved card after first webhook" }
+
+        postWebhook(event + mapOf("id" to "evt_setup_duplicate_2"))
+
+        val cardsAfterSecond = mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isOk() }
+        }.andReturn()
+        val secondCardContent = objectMapper.readTree(cardsAfterSecond.response.contentAsString).get("content")
+        assertEquals(cardsAfterFirstCount, secondCardContent.size())
+    }
+
     private fun login(email: String): String {
         val result = mockMvc.post("/api/auth/login") {
             contentType = MediaType.APPLICATION_JSON
