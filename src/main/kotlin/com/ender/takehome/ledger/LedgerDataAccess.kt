@@ -74,7 +74,7 @@ class LedgerDataAccess(private val dsl: DSLContext) {
             return charge.copy(id = record.id!!)
         }
         dsl.update(RENT_CHARGES)
-            .set(RENT_CHARGES.STATUS, charge.status.name)
+            .set(DSL.field(RENT_CHARGES.STATUS.unqualifiedName, RENT_CHARGES.STATUS.dataType), charge.status.name)
             .where(RENT_CHARGES.ID.eq(charge.id))
             .execute()
         return charge
@@ -176,10 +176,14 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         stripePaymentIntentId: String? = null,
     ): Payment {
         dsl.update(PAYMENTS)
-            .set(PAYMENTS.STATUS, status.name)
+            .set(DSL.field(PAYMENTS.STATUS.unqualifiedName, PAYMENTS.STATUS.dataType), status.name)
             .apply {
-                if (failureReason != null) set(PAYMENTS.FAILURE_REASON, failureReason)
-                if (stripePaymentIntentId != null) set(PAYMENTS.STRIPE_PAYMENT_INTENT_ID, stripePaymentIntentId)
+                if (failureReason != null) {
+                    set(DSL.field(PAYMENTS.FAILURE_REASON.unqualifiedName, PAYMENTS.FAILURE_REASON.dataType), failureReason)
+                }
+                if (stripePaymentIntentId != null) {
+                    set(DSL.field(PAYMENTS.STRIPE_PAYMENT_INTENT_ID.unqualifiedName, PAYMENTS.STRIPE_PAYMENT_INTENT_ID.dataType), stripePaymentIntentId)
+                }
             }
             .where(PAYMENTS.ID.eq(id))
             .execute()
