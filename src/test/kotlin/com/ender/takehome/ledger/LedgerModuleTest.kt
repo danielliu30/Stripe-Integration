@@ -262,6 +262,21 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `applyStripeEvent refunds succeeded payment and reopens charge`() {
+        val payment = TestFixtures.payment(status = PaymentStatus.SUCCEEDED)
+        every { dataAccess.findPaymentByStripePaymentIntentId("pi_1") } returns payment
+        every { dataAccess.updatePaymentStatus(payment.id, PaymentStatus.REFUNDED, null) } returns
+            payment.copy(status = PaymentStatus.REFUNDED)
+        every { dataAccess.findChargeById(payment.rentChargeId) } returns
+            rentCharge.copy(status = RentChargeStatus.PAID)
+        every { dataAccess.saveCharge(any()) } answers { firstArg() }
+
+        module.applyStripeEvent("pi_1", PaymentStatus.REFUNDED)
+
+        verify(exactly = 1) { dataAccess.saveCharge(match { it.status == RentChargeStatus.PENDING }) }
+    }
+
+    @Test
     fun `applyStripeEvent ignores event that would regress a succeeded payment`() {
         val payment = TestFixtures.payment(status = PaymentStatus.SUCCEEDED)
         every { dataAccess.findPaymentByStripePaymentIntentId("pi_1") } returns payment
