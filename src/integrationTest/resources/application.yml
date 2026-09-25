@@ -17,6 +17,13 @@ jwt:
   secret: test-jwt-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256
   expiration-ms: 86400000
 
+stripe:
+  secret-key: sk_test_placeholder
+  webhook-secret: whsec_integration_test
+  currency: usd
+  checkout-success-url: http://localhost/api/checkout/return?status=success
+  checkout-cancel-url: http://localhost/api/checkout/return?status=cancelled
+
 aws:
   region: us-east-1
   s3:
