@@ -17,6 +17,12 @@ class TenantDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    fun findByStripeCustomerId(customerId: String): Tenant? =
+        dsl.selectFrom(TENANTS)
+            .where(TENANTS.STRIPE_CUSTOMER_ID.eq(customerId))
+            .fetchOne()
+            ?.toModel()
+
     fun findByEmail(email: String): Tenant? =
         dsl.selectFrom(TENANTS)
             .where(TENANTS.EMAIL.eq(email))
@@ -47,6 +53,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
             .set(TENANTS.LAST_NAME, tenant.lastName)
             .set(TENANTS.EMAIL, tenant.email)
             .set(TENANTS.PHONE, tenant.phone)
+            .set(TENANTS.STRIPE_CUSTOMER_ID, tenant.stripeCustomerId)
             .where(TENANTS.ID.eq(tenant.id))
             .execute()
         return tenant
@@ -61,6 +68,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
         lastName = lastName!!,
         email = email!!,
         phone = phone,
+        stripeCustomerId = stripeCustomerId,
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
     )
 }
