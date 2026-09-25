@@ -84,18 +84,50 @@ data class RentChargeResponse(
     }
 }
 
+data class CardSummary(
+    val brand: String,
+    val last4: String,
+) {
+    companion object {
+        fun from(c: Card) = CardSummary(c.brand, c.last4)
+    }
+}
+
 data class PaymentResponse(
     val id: Long,
     val rentChargeId: Long,
     val amount: BigDecimal,
     val paymentMethod: PaymentMethod,
+    val status: PaymentStatus,
+    val card: CardSummary?,
+    val failureReason: String?,
+    val clientSecret: String?,
     val notes: String?,
     val recordedBy: String,
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(p: Payment) = PaymentResponse(
-            p.id, p.rentChargeId, p.amount, p.paymentMethod, p.notes, p.recordedBy, p.createdAt
+        fun from(p: Payment, card: Card? = null, clientSecret: String? = null) = PaymentResponse(
+            p.id, p.rentChargeId, p.amount, p.paymentMethod, p.status,
+            card?.let { CardSummary.from(it) }, p.failureReason, clientSecret,
+            p.notes, p.recordedBy, p.createdAt
         )
     }
 }
+
+data class CardResponse(
+    val id: Long,
+    val brand: String,
+    val last4: String,
+    val expMonth: Int,
+    val expYear: Int,
+    val createdAt: Instant,
+) {
+    companion object {
+        fun from(c: Card) = CardResponse(c.id, c.brand, c.last4, c.expMonth, c.expYear, c.createdAt)
+    }
+}
+
+data class SetupIntentResponse(
+    val clientSecret: String,
+)
