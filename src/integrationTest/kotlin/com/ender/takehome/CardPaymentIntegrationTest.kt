@@ -9,8 +9,10 @@ import com.stripe.exception.CardException
 import com.stripe.model.Event
 import com.stripe.net.Webhook
 import org.awaitility.Awaitility
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
@@ -36,6 +38,33 @@ class CardPaymentIntegrationTest : IntegrationTestBase() {
     @BeforeEach
     fun resetStripe() {
         stripeService.chargeCalls = 0
+    }
+
+    @Test
+    fun `tenant saves card through Checkout and pays rent through full lifecycle`() {
+        val tenantToken = login("alice.johnson@email.com")
+        val chargeId = createRentCharge(leaseId = 1, dueDate = "2099-01-01")
+
+        val cardId = saveCard(tenantToken, setupIntentId = "seti_happy", paymentMethodId = "pm_happy", last4 = "4242")
+
+        val payment = payRentCharge(tenantToken, chargeId, cardId, idempotencyKey = "happy-path-rent-charge-1")
+        val paymentId = objectMapper.readTree(payment.response.contentAsString).get("id").asLong()
+
+        completePaymentViaWebhook("pi_happy_path_rent_charge_1")
+
+        mockMvc.get("/api/payments/$paymentId") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.status") { value("SUCCEEDED") }
+            jsonPath("$.card.last4") { value("4242") }
+        }
+        mockMvc.get("/api/rent-charges/$chargeId") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.status") { value("PAID") }
+        }
     }
 
     private fun login(email: String): String {
