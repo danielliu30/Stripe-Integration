@@ -149,6 +149,28 @@ class CardPaymentIntegrationTest : IntegrationTestBase() {
         assertEquals(1, stripeService.chargeCalls)
     }
 
+    @Test
+    fun `tenant cannot pay another tenant's rent charge with saved card`() {
+        val tenantToken = login("alice.johnson@email.com")
+        val otherTenantChargeId = createRentCharge(leaseId = 2, dueDate = "2099-03-01")
+
+        saveCard(tenantToken, setupIntentId = "seti_ownership", paymentMethodId = "pm_ownership", last4 = "1111")
+
+        val cards = mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andReturn()
+        val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+
+        mockMvc.post("/api/rent-charges/$otherTenantChargeId/pay") {
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(mapOf("cardId" to cardId))
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isNotFound() }
+        }
+        assertEquals(0, stripeService.chargeCalls)
+    }
+
     private fun login(email: String): String {
         val result = mockMvc.post("/api/auth/login") {
             contentType = MediaType.APPLICATION_JSON
