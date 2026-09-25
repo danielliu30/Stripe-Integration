@@ -1,16 +1,19 @@
 package com.ender.takehome.ledger
 
+import com.ender.takehome.generated.tables.Leases.LEASES
 import com.ender.takehome.generated.tables.Payments.PAYMENTS
 import com.ender.takehome.generated.tables.RentCharges.RENT_CHARGES
 import com.ender.takehome.generated.tables.records.PaymentsRecord
 import com.ender.takehome.generated.tables.records.RentChargesRecord
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
+import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.model.RentChargeStatus
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Component
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -22,6 +25,14 @@ class LedgerDataAccess(private val dsl: DSLContext) {
     fun findChargeById(id: Long): RentCharge? =
         dsl.selectFrom(RENT_CHARGES)
             .where(RENT_CHARGES.ID.eq(id))
+            .fetchOne()
+            ?.toModel()
+
+    /** Locks the charge row — serializes concurrent pay attempts on the same charge. */
+    fun findChargeByIdForUpdate(id: Long): RentCharge? =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.ID.eq(id))
+            .forUpdate()
             .fetchOne()
             ?.toModel()
 
@@ -71,10 +82,68 @@ class LedgerDataAccess(private val dsl: DSLContext) {
 
     // --- Payment ---
 
+    fun findPaymentById(id: Long): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.ID.eq(id))
+            .fetchOne()
+            ?.toModel()
+
+    fun findPaymentByIdempotencyKey(key: String): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.IDEMPOTENCY_KEY.eq(key))
+            .fetchOne()
+            ?.toModel()
+
+    fun findPaymentByStripePaymentIntentId(paymentIntentId: String): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.STRIPE_PAYMENT_INTENT_ID.eq(paymentIntentId))
+            .fetchOne()
+            ?.toModel()
+
+    /** A payment that hasn't reached a terminal state — blocks new pay attempts. */
+    fun findInFlightPaymentByChargeId(rentChargeId: Long): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
+            .and(PAYMENTS.STATUS.`in`(
+                PaymentStatus.INITIATED.name,
+                PaymentStatus.REQUIRES_ACTION.name,
+                PaymentStatus.PROCESSING.name,
+            ))
+            .fetchOne()
+            ?.toModel()
+
+    fun sumSucceededPayments(rentChargeId: Long): BigDecimal =
+        dsl.select(DSL.coalesce(DSL.sum(PAYMENTS.AMOUNT), BigDecimal.ZERO))
+            .from(PAYMENTS)
+            .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
+            .and(PAYMENTS.STATUS.eq(PaymentStatus.SUCCEEDED.name))
+            .fetchOne(0, BigDecimal::class.java) ?: BigDecimal.ZERO
+
     fun findPaymentsByRentChargeIdCursor(rentChargeId: Long, startAfterId: Long?, limit: Int): List<Payment> =
         dsl.selectFrom(PAYMENTS)
             .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
             .and(paymentCursorCondition(startAfterId))
+            .orderBy(PAYMENTS.ID)
+            .limit(limit)
+            .fetch()
+            .map { it.toModel() }
+
+    /** All payments on charges belonging to the tenant's leases. */
+    fun findPaymentsByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Payment> =
+        dsl.select(PAYMENTS.fields().toList())
+            .from(PAYMENTS)
+            .join(RENT_CHARGES).on(PAYMENTS.RENT_CHARGE_ID.eq(RENT_CHARGES.ID))
+            .join(LEASES).on(RENT_CHARGES.LEASE_ID.eq(LEASES.ID))
+            .where(LEASES.TENANT_ID.eq(tenantId))
+            .and(paymentCursorCondition(startAfterId))
+            .orderBy(PAYMENTS.ID)
+            .limit(limit)
+            .fetchInto(PAYMENTS)
+            .map { it.toModel() }
+
+    fun findAllPaymentsCursor(startAfterId: Long?, limit: Int): List<Payment> =
+        dsl.selectFrom(PAYMENTS)
+            .where(paymentCursorCondition(startAfterId))
             .orderBy(PAYMENTS.ID)
             .limit(limit)
             .fetch()
@@ -86,6 +155,11 @@ class LedgerDataAccess(private val dsl: DSLContext) {
                 rentChargeId = payment.rentChargeId
                 amount = payment.amount
                 paymentMethod = payment.paymentMethod.name
+                status = payment.status.name
+                cardId = payment.cardId
+                stripePaymentIntentId = payment.stripePaymentIntentId
+                idempotencyKey = payment.idempotencyKey
+                failureReason = payment.failureReason
                 notes = payment.notes
                 recordedBy = payment.recordedBy
             }
@@ -93,6 +167,23 @@ class LedgerDataAccess(private val dsl: DSLContext) {
             return payment.copy(id = record.id!!)
         }
         return payment
+    }
+
+    fun updatePaymentStatus(
+        id: Long,
+        status: PaymentStatus,
+        failureReason: String? = null,
+        stripePaymentIntentId: String? = null,
+    ): Payment {
+        dsl.update(PAYMENTS)
+            .set(PAYMENTS.STATUS, status.name)
+            .apply {
+                if (failureReason != null) set(PAYMENTS.FAILURE_REASON, failureReason)
+                if (stripePaymentIntentId != null) set(PAYMENTS.STRIPE_PAYMENT_INTENT_ID, stripePaymentIntentId)
+            }
+            .where(PAYMENTS.ID.eq(id))
+            .execute()
+        return findPaymentById(id)!!
     }
 
     // --- Cursor helpers ---
@@ -119,6 +210,11 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         rentChargeId = rentChargeId!!,
         amount = amount!!,
         paymentMethod = PaymentMethod.valueOf(paymentMethod!!),
+        status = PaymentStatus.valueOf(status!!),
+        cardId = cardId,
+        stripePaymentIntentId = stripePaymentIntentId,
+        idempotencyKey = idempotencyKey,
+        failureReason = failureReason,
         notes = notes,
         recordedBy = recordedBy!!,
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
