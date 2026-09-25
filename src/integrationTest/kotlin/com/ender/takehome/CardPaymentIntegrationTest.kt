@@ -132,6 +132,23 @@ class CardPaymentIntegrationTest : IntegrationTestBase() {
         }
     }
 
+    @Test
+    fun `replaying payment with same idempotency key returns original payment without re-charging`() {
+        val tenantToken = login("alice.johnson@email.com")
+        val chargeId = createRentCharge(leaseId = 1, dueDate = "2099-02-01")
+
+        val cardId = saveCard(tenantToken, setupIntentId = "seti_idempotency", paymentMethodId = "pm_idempotency", last4 = "0001")
+
+        val payment = payRentCharge(tenantToken, chargeId, cardId, idempotencyKey = "idempotency-rent-charge-1")
+        val paymentId = objectMapper.readTree(payment.response.contentAsString).get("id").asLong()
+
+        val replay = payRentCharge(tenantToken, chargeId, cardId, idempotencyKey = "idempotency-rent-charge-1")
+        val replayPaymentId = objectMapper.readTree(replay.response.contentAsString).get("id").asLong()
+
+        assertEquals(paymentId, replayPaymentId)
+        assertEquals(1, stripeService.chargeCalls)
+    }
+
     private fun login(email: String): String {
         val result = mockMvc.post("/api/auth/login") {
             contentType = MediaType.APPLICATION_JSON
