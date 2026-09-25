@@ -19,6 +19,7 @@ import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.stripe.StripeChargeResult
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.exception.CardException
 import com.stripe.exception.StripeException
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -172,6 +173,20 @@ class LedgerModule(
                     "rentChargeId" to chargeId.toString(),
                 ),
             )
+        } catch (e: CardException) {
+            // A decline is a business outcome, not an upstream failure — return
+            // the FAILED payment with Stripe's reason so the client can prompt
+            // for a different card. The PI id lets the webhook reconcile later.
+            log.info("Card declined for payment {}: {}", prepared.payment.id, e.stripeError?.declineCode)
+            val settled = tx.executeWithRetry {
+                settlePayment(
+                    prepared.payment.id,
+                    PaymentStatus.FAILED,
+                    e.stripeError?.message ?: e.message ?: "Card declined",
+                    e.stripeError?.paymentIntent?.id,
+                )
+            }
+            return PaymentResult(settled, prepared.card)
         } catch (e: StripeException) {
             log.error("Stripe charge failed for payment {}", prepared.payment.id, e)
             tx.executeWithRetry {
