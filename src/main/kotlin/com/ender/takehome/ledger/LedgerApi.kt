@@ -1,6 +1,8 @@
 package com.ender.takehome.ledger
 
+import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.GenerateRentChargesRequest
+import com.ender.takehome.dto.request.PayChargeRequest
 import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.dto.response.PaymentResponse
@@ -62,17 +64,53 @@ class LedgerApi(
         jobPublisher.publish(BackgroundJobRequest(BackgroundJobType.GENERATE_RENT_CHARGES, params))
     }
 
-    // --- Manual Payments ---
+    // --- Card payment (tenant) ---
+
+    @PostMapping("/api/rent-charges/{id}/pay")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PreAuthorize("hasRole('TENANT')")
+    fun payCharge(
+        @PathVariable id: Long,
+        @Valid @RequestBody request: PayChargeRequest,
+        @RequestHeader("Idempotency-Key", required = false) idempotencyKey: String?,
+    ): PaymentResponse {
+        val result = ledgerModule.payCharge(UserPrincipal.current(), id, request.cardId, idempotencyKey)
+        return PaymentResponse.from(result.payment, result.card, result.clientSecret)
+    }
+
+    // --- Payments ---
+
+    @GetMapping("/api/payments")
+    fun listPayments(
+        @RequestParam(required = false) startAfterId: Long?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): CursorPage<PaymentResponse> {
+        val page = ledgerModule.getPayments(startAfterId, limit, UserPrincipal.current())
+        val cards = ledgerModule.resolveCards(page.content)
+        return CursorPage(
+            page.content.map { PaymentResponse.from(it, it.cardId?.let(cards::get)) },
+            page.hasMore,
+        )
+    }
+
+    @GetMapping("/api/payments/{id}")
+    fun getPayment(@PathVariable id: Long): PaymentResponse {
+        val result = ledgerModule.getPaymentById(id, UserPrincipal.current())
+        return PaymentResponse.from(result.payment, result.card)
+    }
 
     @GetMapping("/api/payments", params = ["rentChargeId"])
-    @PreAuthorize("hasRole('PROPERTY_MANAGER')")
     fun getPaymentsByRentCharge(
         @RequestParam rentChargeId: Long,
         @RequestParam(required = false) startAfterId: Long?,
         @RequestParam(defaultValue = "20") limit: Int,
     ): CursorPage<PaymentResponse> {
-        val page = ledgerModule.getPaymentsByRentChargeId(rentChargeId, startAfterId, limit)
-        return CursorPage(page.content.map { PaymentResponse.from(it) }, page.hasMore)
+        val page = ledgerModule.getPaymentsByRentChargeId(rentChargeId, startAfterId, limit, UserPrincipal.current())
+        val cards = ledgerModule.resolveCards(page.content)
+        return CursorPage(
+            page.content.map { PaymentResponse.from(it, it.cardId?.let(cards::get)) },
+            page.hasMore,
+        )
     }
 
     @PostMapping("/api/payments")
