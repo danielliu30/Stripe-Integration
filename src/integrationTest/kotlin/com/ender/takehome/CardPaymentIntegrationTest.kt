@@ -111,6 +111,27 @@ class CardPaymentIntegrationTest : IntegrationTestBase() {
         assertEquals(cardsAfterFirstCount, secondCardContent.size())
     }
 
+    @Test
+    fun `declined card returns FAILED payment without paying rent charge`() {
+        val tenantToken = login("alice.johnson@email.com")
+        val chargeId = createRentCharge(leaseId = 1, dueDate = "2099-04-01")
+        val cardId = saveCard(tenantToken, setupIntentId = "seti_declined", paymentMethodId = "pm_declined", last4 = "2222")
+
+        val payment = payRentCharge(tenantToken, chargeId, cardId, idempotencyKey = "declined-rent-charge-1")
+        val paymentJson = objectMapper.readTree(payment.response.contentAsString)
+
+        assertEquals("FAILED", paymentJson.get("status").asText())
+        assertEquals("Card declined; code: card_declined", paymentJson.get("failureReason").asText())
+        assertEquals(1, stripeService.chargeCalls)
+
+        mockMvc.get("/api/rent-charges/$chargeId") {
+            header("Authorization", "Bearer $tenantToken")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.status") { value("PENDING") }
+        }
+    }
+
     private fun login(email: String): String {
         val result = mockMvc.post("/api/auth/login") {
             contentType = MediaType.APPLICATION_JSON
