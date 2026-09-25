@@ -4,7 +4,6 @@ import com.ender.takehome.TestFixtures
 import com.ender.takehome.exception.ResourceNotFoundException
 import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
-import com.ender.takehome.stripe.StripeSetupIntentResult
 import com.ender.takehome.tenant.TenantDataAccess
 import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
@@ -27,30 +26,28 @@ class CardModuleTest {
     }
 
     @Test
-    fun `createSetupIntent creates Stripe customer lazily and persists it`() {
+    fun `createSetupCheckoutSession creates Stripe customer lazily and persists it`() {
         every { tenantDataAccess.findById(1L) } returns tenant
         every { stripeService.createCustomer(tenant) } returns "cus_new"
         every { tenantDataAccess.save(match { it.stripeCustomerId == "cus_new" }) } answers { firstArg() }
-        every { stripeService.createSetupIntent("cus_new") } returns
-            StripeSetupIntentResult("seti_1", "seti_1_secret_abc")
+        every { stripeService.createSetupCheckoutSession("cus_new") } returns "https://checkout.stripe.com/session"
 
-        val secret = module.createSetupIntent(1L)
+        val url = module.createSetupCheckoutSession(1L)
 
-        assertEquals("seti_1_secret_abc", secret)
+        assertEquals("https://checkout.stripe.com/session", url)
         verify(exactly = 1) { stripeService.createCustomer(tenant) }
         verify(exactly = 1) { tenantDataAccess.save(match { it.stripeCustomerId == "cus_new" }) }
     }
 
     @Test
-    fun `createSetupIntent reuses existing Stripe customer`() {
+    fun `createSetupCheckoutSession reuses existing Stripe customer`() {
         val withCustomer = tenant.copy(stripeCustomerId = "cus_existing")
         every { tenantDataAccess.findById(1L) } returns withCustomer
-        every { stripeService.createSetupIntent("cus_existing") } returns
-            StripeSetupIntentResult("seti_2", "seti_2_secret_def")
+        every { stripeService.createSetupCheckoutSession("cus_existing") } returns "https://checkout.stripe.com/session"
 
-        val secret = module.createSetupIntent(1L)
+        val url = module.createSetupCheckoutSession(1L)
 
-        assertEquals("seti_2_secret_def", secret)
+        assertEquals("https://checkout.stripe.com/session", url)
         verify(exactly = 0) { stripeService.createCustomer(any()) }
     }
 
