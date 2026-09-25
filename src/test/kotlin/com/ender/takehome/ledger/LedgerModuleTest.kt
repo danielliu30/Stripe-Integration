@@ -17,6 +17,7 @@ import com.ender.takehome.stripe.StripeChargeResult
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
 import com.stripe.exception.ApiException
+import com.stripe.exception.CardException
 import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -216,6 +217,32 @@ class LedgerModuleTest {
             module.payCharge(principal, rentCharge.id, card.id, null)
         }
         verify(exactly = 1) { dataAccess.updatePaymentStatus(initiated.id, PaymentStatus.FAILED, "Payment processor error") }
+    }
+
+    @Test
+    fun `payCharge returns FAILED payment with decline reason when card is declined`() {
+        val initiated = TestFixtures.payment(status = PaymentStatus.INITIATED)
+        val failed = initiated.copy(status = PaymentStatus.FAILED, failureReason = "Card declined; code: card_declined")
+
+        every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { dataAccess.findInFlightPaymentByChargeId(rentCharge.id) } returns null
+        every { cardDataAccess.findById(card.id) } returns card
+        every { tenantDataAccess.findById(1L) } returns tenant
+        every { dataAccess.sumSucceededPayments(rentCharge.id) } returns BigDecimal.ZERO
+        every { dataAccess.savePayment(any()) } returns initiated
+        every { stripeService.chargeCard(any(), any(), any(), any(), any()) } throws
+            CardException("Card declined", null, "card_declined", null, "generic_decline", null, 402, null)
+        every { dataAccess.updatePaymentStatus(initiated.id, PaymentStatus.FAILED, "Card declined; code: card_declined", null) } returns failed
+
+        val result = module.payCharge(principal, rentCharge.id, card.id, null)
+
+        assertEquals(PaymentStatus.FAILED, result.payment.status)
+        assertEquals("Card declined; code: card_declined", result.payment.failureReason)
+        verify(exactly = 1) {
+            dataAccess.updatePaymentStatus(initiated.id, PaymentStatus.FAILED, "Card declined; code: card_declined", null)
+        }
+        verify(exactly = 0) { dataAccess.saveCharge(any()) }
     }
 
     // --- applyStripeEvent ---
