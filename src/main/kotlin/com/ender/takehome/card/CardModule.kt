@@ -18,19 +18,18 @@ class CardModule(
     private val log = LoggerFactory.getLogger(CardModule::class.java)
 
     /**
-     * Creates a Stripe SetupIntent for the tenant so the client can collect
-     * card details directly with Stripe. The Stripe Customer is created lazily
-     * on first call and persisted on the tenant.
+     * Creates a Stripe-hosted Checkout Session for card collection. The Stripe
+     * Customer is created lazily on first call and persisted on the tenant.
      */
     @Transactional
-    fun createSetupIntent(tenantId: Long): String {
+    fun createSetupCheckoutSession(tenantId: Long): String {
         val tenant = tenantDataAccess.findById(tenantId)
             ?: throw ResourceNotFoundException("Tenant not found: $tenantId")
         val customerId = tenant.stripeCustomerId
             ?: stripeService.createCustomer(tenant).also {
                 tenantDataAccess.save(tenant.copy(stripeCustomerId = it))
             }
-        return stripeService.createSetupIntent(customerId).clientSecret
+        return stripeService.createSetupCheckoutSession(customerId)
     }
 
     fun getCards(tenantId: Long, startAfterId: Long?, limit: Int): CursorPage<Card> {

@@ -128,6 +128,6 @@ data class CardResponse(
     }
 }
 
-data class SetupIntentResponse(
-    val clientSecret: String,
+data class CheckoutSessionResponse(
+    val url: String,
 )

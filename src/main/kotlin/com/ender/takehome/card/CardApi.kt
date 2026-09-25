@@ -2,8 +2,8 @@ package com.ender.takehome.card
 
 import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.response.CardResponse
+import com.ender.takehome.dto.response.CheckoutSessionResponse
 import com.ender.takehome.dto.response.CursorPage
-import com.ender.takehome.dto.response.SetupIntentResponse
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.*
 @PreAuthorize("hasRole('TENANT')")
 class CardApi(private val cardModule: CardModule) {
 
-    @PostMapping("/setup-intent")
+    @PostMapping("/checkout-session")
     @ResponseStatus(HttpStatus.CREATED)
-    fun createSetupIntent(): SetupIntentResponse =
-        SetupIntentResponse(cardModule.createSetupIntent(UserPrincipal.current().tenantId!!))
+    fun createCheckoutSession(): CheckoutSessionResponse =
+        CheckoutSessionResponse(cardModule.createSetupCheckoutSession(UserPrincipal.current().tenantId!!))
 
     @GetMapping
     fun list(
