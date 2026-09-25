@@ -21,7 +21,7 @@ class SecurityConfig(
         .csrf { it.disable() }
         .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
         .authorizeHttpRequests {
-            it.requestMatchers("/api/auth/**", "/api/webhooks/**").permitAll()
+            it.requestMatchers("/api/auth/**", "/api/webhooks/**", "/api/checkout/**").permitAll()
                 .anyRequest().authenticated()
         }
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
