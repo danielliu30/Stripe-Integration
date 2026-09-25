@@ -282,9 +282,17 @@ class LedgerModule(
         stripePaymentIntentId: String? = null,
     ): Payment {
         val updated = dataAccess.updatePaymentStatus(paymentId, status, failureReason, stripePaymentIntentId)
-        if (status == PaymentStatus.SUCCEEDED) {
-            val charge = dataAccess.findChargeById(updated.rentChargeId)!!
-            dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PAID))
+        when (status) {
+            PaymentStatus.SUCCEEDED -> {
+                val charge = dataAccess.findChargeById(updated.rentChargeId)!!
+                dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PAID))
+            }
+            // Money returned to the tenant — the charge is owed again
+            PaymentStatus.REFUNDED -> {
+                val charge = dataAccess.findChargeById(updated.rentChargeId)!!
+                dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PENDING))
+            }
+            else -> {}
         }
         return updated
     }
