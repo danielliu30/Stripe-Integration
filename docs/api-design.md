@@ -25,15 +25,14 @@ that isn't theirs (see `TenantApi.get`).
 | 2 | Tenant views payment status | `status` field on `PaymentResponse` |
 | 3 | Tenant notified on success/fail/in-progress | Status transition + `outbox_events` row (same tx) → relay → `payment-events` queue → consumer writes `notifications` row **and pushes via SSE**; `GET /api/notifications/stream` (push), `GET /api/notifications` (history) |
 | 4 | Tenant views payment methods | `GET /api/cards` |
-| 5 | Tenant adds a payment method | `POST /api/cards/setup-intent` + Stripe.js confirm → `setup_intent.succeeded` webhook persists card + pushes `CARD_ADDED` |
+| 5 | Tenant adds a payment method | `POST /api/cards/checkout-session` → Stripe-hosted collection → `setup_intent.succeeded` webhook persists card + pushes `CARD_ADDED` |
 | 6 | Tenant removes a payment method | `DELETE /api/cards/{id}` → outbox `CARD_REMOVED` event pushed via SSE |
 | 7 | Payment amount = charge balance, client only picks method | `POST /api/rent-charges/{id}/pay` takes `{ cardId }` only; amount is derived server-side |
 
 ## Principles
 
-- **Card data never touches our server.** Cards are collected client-side via Stripe
-  (Payment Element / SetupIntent). Our DB stores only Stripe IDs + display metadata
-  (brand, last4, expiry).
+- **Card data never touches our server.** Cards are collected by Stripe-hosted
+  Checkout. Our DB stores only Stripe IDs + display metadata (brand, last4, expiry).
 - **Card payments are asynchronous.** Recording a card payment returns a payment
   resource immediately; its status advances via Stripe webhooks. This is the core
   difference from manual payments, which are recorded already-settled.
@@ -74,10 +73,10 @@ Manual payments are inserted directly as `SUCCEEDED`.
 
 ### Card management (TENANT only — always scoped to caller's tenant)
 
-#### `POST /api/cards/setup-intent`
-Creates a Stripe `SetupIntent` for the tenant's Stripe Customer (creating the
-Customer lazily on first call). The client uses `clientSecret` + Stripe.js to
-collect card details and attach the resulting PaymentMethod to the Customer.
+#### `POST /api/cards/checkout-session`
+Creates a setup-mode Stripe Checkout Session for the tenant's Stripe Customer
+(creating the Customer lazily on first call). The caller opens the returned URL,
+and Stripe hosts the card-collection UI.
 
 The local `cards` row is created when Stripe's `setup_intent.succeeded`
 webhook arrives — we persist from Stripe's confirmation, not a client callback.
@@ -86,7 +85,7 @@ the new card pushed over SSE as soon as it lands.
 
 Response `201`:
 ```json
-{ "clientSecret": "seti_1Xxx_secret_yyy" }
+{ "url": "https://checkout.stripe.com/c/pay/cs_test_..." }
 ```
 
 #### `GET /api/cards`
@@ -302,18 +301,15 @@ Marks one notification read. `404` if not found / not owned. Response `204`.
 
 - Refunds: status modeled, but no refund-initiation endpoint in v1.
 - No saved-bank/ACH methods — `CREDIT_CARD` only.
-- `REQUIRES_ACTION` is modeled but the 3DS client flow is documented, not built
-  (no frontend exists — decision: backend-only; the browser→Stripe.js flow is
-  described for integrators but not shipped).
+- `REQUIRES_ACTION` is modeled, but resuming a 3DS-authenticated payment still
+  requires a client flow outside this backend-only service.
 
 ## Open questions
 
-1. Endpoint naming: `POST /api/cards/setup-intent` vs `/api/cards/setup-session` —
-   former is more Stripe-transparent; fine either way.
-2. Should PMs get a "record card payment on behalf of tenant" path? Assumed no —
+1. Should PMs get a "record card payment on behalf of tenant" path? Assumed no —
    cards are tenant-owned and charges are tenant-initiated.
-3. Notifications are in-app only (SSE push + persisted history) — no
+2. Notifications are in-app only (SSE push + persisted history) — no
    email/SMS/push. Acceptable?
-4. Pre-existing gap: `GET /api/rent-charges?leaseId=` doesn't check tenant
+3. Pre-existing gap: `GET /api/rent-charges?leaseId=` doesn't check tenant
    ownership — a tenant can enumerate other leases' charges. Worth fixing while
    we're in here (out of scope but flagging).
