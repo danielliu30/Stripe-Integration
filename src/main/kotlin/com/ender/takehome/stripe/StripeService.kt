@@ -9,7 +9,7 @@ import com.stripe.net.RequestOptions
 import com.stripe.net.Webhook
 import com.stripe.param.CustomerCreateParams
 import com.stripe.param.PaymentIntentCreateParams
-import com.stripe.param.SetupIntentCreateParams
+import com.stripe.param.checkout.SessionCreateParams
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.math.BigDecimal
@@ -19,11 +19,6 @@ data class StripeCardDetails(
     val last4: String,
     val expMonth: Int,
     val expYear: Int,
-)
-
-data class StripeSetupIntentResult(
-    val id: String,
-    val clientSecret: String,
 )
 
 data class StripeChargeResult(
@@ -39,7 +34,7 @@ data class StripeChargeResult(
  */
 interface StripeService {
     fun createCustomer(tenant: Tenant): String
-    fun createSetupIntent(customerId: String): StripeSetupIntentResult
+    fun createSetupCheckoutSession(customerId: String): String
     fun getCardDetails(paymentMethodId: String): StripeCardDetails
     fun detachPaymentMethod(paymentMethodId: String)
     fun chargeCard(
@@ -57,6 +52,8 @@ class StripeServiceImpl(
     @Value("\${stripe.secret-key}") secretKey: String,
     @Value("\${stripe.webhook-secret}") private val webhookSecret: String,
     @Value("\${stripe.currency}") private val currency: String,
+    @Value("\${stripe.checkout-success-url}") private val checkoutSuccessUrl: String,
+    @Value("\${stripe.checkout-cancel-url}") private val checkoutCancelUrl: String,
 ) : StripeService {
 
     private val client = StripeClient(secretKey)
@@ -70,16 +67,16 @@ class StripeServiceImpl(
                 .build()
         ).id
 
-    override fun createSetupIntent(customerId: String): StripeSetupIntentResult {
-        val intent = client.v1().setupIntents().create(
-            SetupIntentCreateParams.builder()
+    override fun createSetupCheckoutSession(customerId: String): String =
+        client.v1().checkout().sessions().create(
+            SessionCreateParams.builder()
+                .setMode(SessionCreateParams.Mode.SETUP)
                 .setCustomer(customerId)
-                .setUsage(SetupIntentCreateParams.Usage.OFF_SESSION)
-                .addPaymentMethodType("card")
+                .addPaymentMethodType(SessionCreateParams.PaymentMethodType.CARD)
+                .setSuccessUrl(checkoutSuccessUrl)
+                .setCancelUrl(checkoutCancelUrl)
                 .build()
-        )
-        return StripeSetupIntentResult(intent.id, intent.clientSecret)
-    }
+        ).url
 
     override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
         val pm = client.v1().paymentMethods().retrieve(paymentMethodId)
