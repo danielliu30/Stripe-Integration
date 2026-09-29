@@ -54,6 +54,46 @@ object TestFixtures {
         status = status,
     )
 
+    fun card(
+        id: Long = 1L,
+        tenantId: Long = 1L,
+        stripePaymentMethodId: String = "pm_test_123",
+        brand: String = "visa",
+        last4: String = "4242",
+        expMonth: Int = 12,
+        expYear: Int = 2028,
+    ) = Card(
+        id = id,
+        tenantId = tenantId,
+        stripePaymentMethodId = stripePaymentMethodId,
+        brand = brand,
+        last4 = last4,
+        expMonth = expMonth,
+        expYear = expYear,
+    )
+
+    fun payment(
+        id: Long = 1L,
+        rentChargeId: Long = 1L,
+        amount: BigDecimal = BigDecimal("2000.00"),
+        paymentMethod: PaymentMethod = PaymentMethod.CREDIT_CARD,
+        status: PaymentStatus = PaymentStatus.INITIATED,
+        cardId: Long? = 1L,
+        stripePaymentIntentId: String? = null,
+        idempotencyKey: String? = null,
+        recordedBy: String = "test@tenant.com",
+    ) = Payment(
+        id = id,
+        rentChargeId = rentChargeId,
+        amount = amount,
+        paymentMethod = paymentMethod,
+        status = status,
+        cardId = cardId,
+        stripePaymentIntentId = stripePaymentIntentId,
+        idempotencyKey = idempotencyKey,
+        recordedBy = recordedBy,
+    )
+
     fun rentCharge(
         id: Long = 1L,
         leaseId: Long = 1L,
