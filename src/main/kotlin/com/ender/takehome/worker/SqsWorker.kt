@@ -37,7 +37,13 @@ class SqsWorker(
             .waitTimeSeconds(5)
             .build()
 
-        val messages = sqsClient.receiveMessage(request).messages()
+        val messages = try {
+            sqsClient.receiveMessage(request).messages()
+        } catch (e: Exception) {
+            log.warn("SQS poll failed, will retry: {}", e.message)
+            return
+        }
+
         for (message in messages) {
             try {
                 val job = objectMapper.readValue(message.body(), BackgroundJobRequest::class.java)
