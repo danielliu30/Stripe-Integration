@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
@@ -20,6 +21,7 @@ import java.net.URI
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 abstract class IntegrationTestBase {
 
     companion object {
@@ -51,6 +53,10 @@ abstract class IntegrationTestBase {
 
             registry.add("aws.sqs.endpoint") { endpoint }
             registry.add("aws.sqs.queue-url") { queueUrl }
+
+            registry.add("stripe.secret-key") { System.getenv("STRIPE_SECRET_KEY") ?: "" }
+            registry.add("stripe.webhook-secret") { System.getenv("STRIPE_WEBHOOK_SECRET") ?: "whsec_test_secret_for_integration_tests" }
+            registry.add("stripe.return-url") { System.getenv("STRIPE_RETURN_URL") ?: "http://localhost/api/checkout/return?status=success" }
         }
     }
 
