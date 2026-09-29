@@ -38,4 +38,16 @@ class GlobalExceptionHandler {
         ResponseEntity.badRequest().body(
             ErrorResponse(400, "Bad Request", ex.message ?: "Invalid request")
         )
+
+    @ExceptionHandler(ConflictException::class)
+    fun handleConflict(ex: ConflictException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ErrorResponse(409, "Conflict", ex.message ?: "Conflict")
+        )
+
+    @ExceptionHandler(UpstreamException::class)
+    fun handleUpstream(ex: UpstreamException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
+            ErrorResponse(502, "Bad Gateway", ex.message ?: "Upstream service error")
+        )
 }
