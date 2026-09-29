@@ -17,6 +17,12 @@ class TenantDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    fun findByStripeCustomerId(customerId: String): Tenant? =
+        dsl.selectFrom(TENANTS)
+            .where(TENANTS.STRIPE_CUSTOMER_ID.eq(customerId))
+            .fetchOne()
+            ?.toModel()
+
     fun findByEmail(email: String): Tenant? =
         dsl.selectFrom(TENANTS)
             .where(TENANTS.EMAIL.eq(email))
@@ -43,10 +49,11 @@ class TenantDataAccess(private val dsl: DSLContext) {
             return tenant.copy(id = record.id!!)
         }
         dsl.update(TENANTS)
-            .set(TENANTS.FIRST_NAME, tenant.firstName)
-            .set(TENANTS.LAST_NAME, tenant.lastName)
-            .set(TENANTS.EMAIL, tenant.email)
-            .set(TENANTS.PHONE, tenant.phone)
+            .set(DSL.field(TENANTS.FIRST_NAME.unqualifiedName, TENANTS.FIRST_NAME.dataType), tenant.firstName)
+            .set(DSL.field(TENANTS.LAST_NAME.unqualifiedName, TENANTS.LAST_NAME.dataType), tenant.lastName)
+            .set(DSL.field(TENANTS.EMAIL.unqualifiedName, TENANTS.EMAIL.dataType), tenant.email)
+            .set(DSL.field(TENANTS.PHONE.unqualifiedName, TENANTS.PHONE.dataType), tenant.phone)
+            .set(DSL.field(TENANTS.STRIPE_CUSTOMER_ID.unqualifiedName, TENANTS.STRIPE_CUSTOMER_ID.dataType), tenant.stripeCustomerId)
             .where(TENANTS.ID.eq(tenant.id))
             .execute()
         return tenant
@@ -61,6 +68,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
         lastName = lastName!!,
         email = email!!,
         phone = phone,
+        stripeCustomerId = stripeCustomerId,
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
     )
 }
