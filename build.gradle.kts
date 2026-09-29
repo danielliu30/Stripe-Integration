@@ -9,6 +9,7 @@ plugins {
 
 group = "com.ender"
 version = "0.0.1"
+extra["testcontainers.version"] = "1.21.4"
 
 java {
     toolchain {
@@ -48,6 +49,7 @@ dependencies {
 
     // Database
     runtimeOnly("com.mysql:mysql-connector-j")
+    runtimeOnly("com.h2database:h2")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-mysql")
 
@@ -55,11 +57,14 @@ dependencies {
     implementation("software.amazon.awssdk:s3")
     implementation("software.amazon.awssdk:sqs")
 
+    // Stripe
+    implementation("com.stripe:stripe-java:33.3.0")
+
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("io.mockk:mockk:1.13.13")
-    testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.4"))
+    testImplementation(platform("org.testcontainers:testcontainers-bom:1.21.4"))
     testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.awaitility:awaitility:4.2.2")
