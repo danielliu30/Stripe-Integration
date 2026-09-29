@@ -34,8 +34,8 @@ docker-compose up -d
 # Run unit tests
 ./gradlew test
 
-# Run integration tests (Docker required — spins up ElasticMQ via Testcontainers)
-./gradlew integrationTest
+# Run integration tests (Docker + Stripe test keys required — spins up ElasticMQ via Testcontainers)
+STRIPE_SECRET_KEY=sk_test_... ./gradlew integrationTest
 
 # Run both
 ./gradlew test integrationTest
@@ -143,9 +143,81 @@ Response format:
 - `GET    /api/rent-charges?leaseId={id}` — Get charges by lease (paginated)
 - `GET    /api/rent-charges?leaseId={id}&status=PENDING` — Filter by status (paginated)
 
-### Manual Payments (PM only)
-- `GET    /api/manual-payments?rentChargeId={id}` — Get payments for a charge (paginated)
-- `POST   /api/manual-payments` — Record a manual payment
+### Cards (tenant only)
+- `POST   /api/cards/checkout-session` — Create a Stripe-hosted Checkout Session; returns the card-collection URL
+- `GET    /api/cards` — List the tenant's saved cards (paginated)
+- `DELETE /api/cards/{id}` — Detach a saved card (removes it locally and in Stripe)
+
+### Card Payments (tenant only)
+- `POST   /api/rent-charges/{id}/pay` — Pay a charge with a saved card (`{"cardId": <id>}`; optional `Idempotency-Key` header)
+
+### Payments
+- `GET    /api/payments` — List payments (tenants see their own, PMs see all; paginated)
+- `GET    /api/payments/{id}` — Get payment by ID
+- `GET    /api/payments?rentChargeId={id}` — Get payments for a charge (paginated)
+- `POST   /api/payments` — Record a manual payment (PM only)
+
+### Stripe Integration (public)
+- `POST   /api/webhooks/stripe` — Stripe event receiver (`Stripe-Signature` header; setup_intent/payment_intent/charge.refunded events)
+- `GET    /api/checkout/return?status={success|cancelled}` — Landing target for hosted Checkout redirects
+
+### Card setup
+```bash
+curl -X POST http://localhost:8080/api/cards/checkout-session \
+  -H 'Authorization: Bearer <token>'
+# → {"url": "https://checkout.stripe.com/c/pay/cs_test_..."}
+```
+
+Open the returned URL to collect card details on Stripe's hosted page. Card details never pass through this API. After Stripe sends the `setup_intent.succeeded` webhook, the card appears in `GET /api/cards`.
+
+### Testing with Stripe test mode
+
+The card-payment feature can be exercised against Stripe's test-mode environment
+using a regular Stripe account and test API keys:
+
+1. Create a test account at https://dashboard.stripe.com/register and copy the
+   **test** secret key (`sk_test_...`).
+2. Set the environment variables:
+
+   ```bash
+   export STRIPE_SECRET_KEY=sk_test_...
+   export STRIPE_WEBHOOK_SECRET=whsec_...
+   export STRIPE_RETURN_URL=https://your-domain.com/checkout/return
+   ```
+
+3. Start the app normally:
+
+   ```bash
+   docker-compose up -d
+   ./gradlew bootRun
+   ```
+
+4. Expose the local webhook endpoint to Stripe using the Stripe CLI:
+
+   ```bash
+   stripe login
+   stripe listen --forward-to http://localhost:8080/api/webhooks/stripe
+   ```
+
+   Copy the webhook signing secret printed by `stripe listen` into
+   `STRIPE_WEBHOOK_SECRET`.
+
+5. Use Stripe test card numbers such as:
+
+   - `4242 4242 4242 4242` — successful payment
+   - `4000 0000 0000 0002` — card declined
+   - `4000 0025 0000 3155` — requires 3D Secure
+
+### Pay a rent charge example
+```bash
+curl -X POST http://localhost:8080/api/rent-charges/1/pay \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Idempotency-Key: <unique-key>' \
+  -H 'Content-Type: application/json' \
+  -d '{"cardId": 1}'
+# → {"id": 3, "status": "SUCCEEDED", "amount": 2500.00, "card": {"brand": "visa", "last4": "4242"}, ...}
+# Declined card → {"status": "FAILED", "failureReason": "Your card was declined."}
+```
 
 ## Architecture
 
@@ -171,6 +243,11 @@ src/main/kotlin/com/ender/takehome/
 ### Seed Data
 
 The migration creates sample data: 1 property manager, 2 properties, 4 units, 3 tenants, 2 active leases, rent charges with manual payments, and 4 user accounts.
+
+## Next Steps (Not Yet Implemented)
+
+- **Autopay** — let a tenant opt into automatic card charges when rent comes due. Design: `tenants.autopay_enabled` + `autopay_card_id`, an enable/disable endpoint, and an SQS worker job that charges the saved card N days before `dueDate` via the existing `payCharge` path (idempotency keyed on charge id). Open questions: failure retry cadence, tenant notification, and the 3DS fallback (off-session `REQUIRES_ACTION` charges need a "tap to confirm" flow since no user is present).
+- **Partial refunds** — `charge.refunded` currently reopens the whole charge to `PENDING`. A partial refund should only reopen `amount_refunded` worth of balance; model refund amounts on the payment/charge rather than deriving from status alone.
 
 ## Your Task
 
