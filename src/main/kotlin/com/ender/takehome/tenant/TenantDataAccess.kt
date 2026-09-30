@@ -38,6 +38,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
                 lastName = tenant.lastName
                 email = tenant.email
                 phone = tenant.phone
+                stripeCustomerId = tenant.stripeCustomerId
             }
             record.store()
             return tenant.copy(id = record.id!!)
@@ -47,6 +48,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
             .set(TENANTS.LAST_NAME, tenant.lastName)
             .set(TENANTS.EMAIL, tenant.email)
             .set(TENANTS.PHONE, tenant.phone)
+            .set(TENANTS.STRIPE_CUSTOMER_ID, tenant.stripeCustomerId)
             .where(TENANTS.ID.eq(tenant.id))
             .execute()
         return tenant
@@ -61,6 +63,7 @@ class TenantDataAccess(private val dsl: DSLContext) {
         lastName = lastName!!,
         email = email!!,
         phone = phone,
+        stripeCustomerId = stripeCustomerId,
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
     )
 }
