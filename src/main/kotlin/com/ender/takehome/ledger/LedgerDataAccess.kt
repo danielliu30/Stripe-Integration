@@ -83,6 +83,12 @@ class LedgerDataAccess(private val dsl: DSLContext) {
     // --- Payment ---
 
     /** Finds a non-terminal payment that must finish before another attempt can begin. */
+    fun findPaymentByIdempotencyKey(idempotencyKey: String): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.IDEMPOTENCY_KEY.eq(idempotencyKey))
+            .fetchOne()
+            ?.toModel()
+
     fun findInFlightPaymentByChargeId(rentChargeId: Long): Payment? =
         dsl.selectFrom(PAYMENTS)
             .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))

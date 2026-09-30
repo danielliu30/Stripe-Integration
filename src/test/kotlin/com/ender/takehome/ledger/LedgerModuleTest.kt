@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.jooq.exception.IntegrityConstraintViolationException
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -54,6 +55,7 @@ class LedgerModuleTest {
         every { transactionHelper.executeWithRetry(any(), any(), any<() -> Any?>()) } answers {
             thirdArg<() -> Any?>().invoke()
         }
+        every { dataAccess.findPaymentByIdempotencyKey(any()) } returns null
     }
 
     @Test
@@ -124,7 +126,7 @@ class LedgerModuleTest {
         every { leaseDataAccess.findById(lease.id) } returns lease.copy(tenantId = 2L)
 
         assertThrows<ResourceNotFoundException> {
-            module.payCharge(principal, rentCharge.id, card.id)
+            module.payCharge(principal, rentCharge.id, card.id, "test-key")
         }
         verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
     }
@@ -136,13 +138,60 @@ class LedgerModuleTest {
         every { leaseDataAccess.findById(lease.id) } returns lease
 
         assertThrows<ConflictException> {
-            module.payCharge(principal, rentCharge.id, card.id)
+            module.payCharge(principal, rentCharge.id, card.id, "test-key")
         }
         verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `payCharge uses stable payment idempotency key and marks charge paid`() {
+    fun `payCharge returns existing payment before inserting or charging`() {
+        val existing = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.SUCCEEDED,
+            cardId = card.id,
+            idempotencyKey = "replay-key",
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.findPaymentByIdempotencyKey("replay-key") } returns existing
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { cardDataAccess.findById(card.id) } returns card
+
+        val result = module.payCharge(principal, rentCharge.id, card.id, "replay-key")
+
+        assertEquals(existing.id, result.payment.id)
+        verify(exactly = 0) { dataAccess.savePayment(any()) }
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `payCharge reloads winner after duplicate idempotency insert`() {
+        val existing = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.INITIATED,
+            cardId = card.id,
+            idempotencyKey = "race-key",
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.findPaymentByIdempotencyKey("race-key") } returnsMany listOf(null, existing)
+        stubPaymentPreparation()
+        every { dataAccess.savePayment(any()) } throws IntegrityConstraintViolationException("duplicate")
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+
+        val result = module.payCharge(principal, rentCharge.id, card.id, "race-key")
+
+        assertEquals(existing.id, result.payment.id)
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `payCharge forwards client idempotency key and marks charge paid`() {
         stubPaymentPreparation()
         val initiated = Payment(
             id = 10L,
@@ -155,7 +204,7 @@ class LedgerModuleTest {
         )
         every { dataAccess.savePayment(any()) } returns initiated
         every {
-            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "payment-cus_test-10", any())
+            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "test-key", any())
         } returns StripeChargeResult("pi_test", PaymentStatus.SUCCEEDED, null)
         every {
             dataAccess.updatePaymentStatus(10L, PaymentStatus.SUCCEEDED, null, "pi_test")
@@ -163,11 +212,11 @@ class LedgerModuleTest {
         every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
         every { dataAccess.saveCharge(any()) } answers { firstArg() }
 
-        val result = module.payCharge(principal, rentCharge.id, card.id)
+        val result = module.payCharge(principal, rentCharge.id, card.id, "test-key")
 
         assertEquals(PaymentStatus.SUCCEEDED, result.payment.status)
         verify(exactly = 1) {
-            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "payment-cus_test-10", any())
+            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "test-key", any())
         }
         verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
     }

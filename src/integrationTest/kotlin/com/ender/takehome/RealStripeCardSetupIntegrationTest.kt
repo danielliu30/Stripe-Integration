@@ -125,7 +125,13 @@ class RealStripeCardSetupIntegrationTest {
             val charge = ledgerDataAccess.saveCharge(
                 RentCharge(leaseId = 2L, amount = BigDecimal("1.00"), dueDate = LocalDate.of(2099, 1, 1))
             )
-            pay(token, charge.id, cardId)
+            val requestIdempotencyKey = "real-request-${UUID.randomUUID()}"
+            val firstPayment = pay(token, charge.id, cardId, requestIdempotencyKey)
+            val secondPayment = pay(token, charge.id, cardId, requestIdempotencyKey)
+            assertEquals(
+                objectMapper.readTree(firstPayment).get("id").asLong(),
+                objectMapper.readTree(secondPayment).get("id").asLong(),
+            )
             assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
 
             val stripeIdempotencyKey = "real-stripe-${UUID.randomUUID()}"
@@ -157,9 +163,10 @@ class RealStripeCardSetupIntegrationTest {
         }
     }
 
-    private fun pay(token: String, chargeId: Long, cardId: Long): String =
+    private fun pay(token: String, chargeId: Long, cardId: Long, idempotencyKey: String): String =
         mockMvc.post("/api/rent-charges/$chargeId/pay") {
             header("Authorization", "Bearer $token")
+            header("Idempotency-Key", idempotencyKey)
             contentType = MediaType.APPLICATION_JSON
             content = """{"cardId":$cardId}"""
         }.andExpect {

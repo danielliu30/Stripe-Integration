@@ -76,8 +76,9 @@ class LedgerApi(
     fun payCharge(
         @PathVariable id: Long,
         @Valid @RequestBody request: PayChargeRequest,
+        @RequestHeader("Idempotency-Key") idempotencyKey: String,
     ): PaymentResponse {
-        val result = ledgerModule.payCharge(UserPrincipal.current(), id, request.cardId)
+        val result = ledgerModule.payCharge(UserPrincipal.current(), id, request.cardId, idempotencyKey)
         return PaymentResponse.from(result.payment, result.card)
     }
 

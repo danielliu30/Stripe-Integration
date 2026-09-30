@@ -3,6 +3,8 @@ package com.ender.takehome
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
 import com.ender.takehome.model.Card
+import com.ender.takehome.model.Payment
+import com.ender.takehome.model.PaymentMethod
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.stripe.StripeChargeResult
@@ -12,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -21,10 +24,12 @@ import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
+import org.jooq.exception.IntegrityConstraintViolationException
 import org.springframework.test.web.servlet.post
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.util.UUID
 
 @Tag("integration")
 @SpringBootTest(properties = [
@@ -74,18 +79,39 @@ class CardPaymentIntegrationTest {
         val token = login("alice.johnson@email.com")
         val body = """{"cardId":${card.id}}"""
 
-        val response = pay(token, charge.id, body)
-        val paymentId = objectMapper.readTree(response).get("id").asLong()
+        val first = pay(token, charge.id, body)
+        val second = pay(token, charge.id, body)
+        val firstPaymentId = objectMapper.readTree(first).get("id").asLong()
+        val secondPaymentId = objectMapper.readTree(second).get("id").asLong()
 
+        assertEquals(firstPaymentId, secondPaymentId)
         assertEquals(1, stripeService.chargeCalls)
-        assertEquals(listOf("payment-cus_alice-$paymentId"), stripeService.idempotencyKeys)
+        assertEquals(listOf("e2e-request-key"), stripeService.idempotencyKeys)
         assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
         assertEquals(1, ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).size)
+    }
+
+    @Test
+    fun `database rejects duplicate payment idempotency key`() {
+        val key = "database-${UUID.randomUUID()}"
+        val payment = Payment(
+            rentChargeId = 1L,
+            amount = BigDecimal("1.00"),
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            idempotencyKey = key,
+            recordedBy = "alice.johnson@email.com",
+        )
+        ledgerDataAccess.savePayment(payment)
+
+        assertThrows<IntegrityConstraintViolationException> {
+            ledgerDataAccess.savePayment(payment)
+        }
     }
 
     private fun pay(token: String, chargeId: Long, body: String): String =
         mockMvc.post("/api/rent-charges/$chargeId/pay") {
             header("Authorization", "Bearer $token")
+            header("Idempotency-Key", "e2e-request-key")
             contentType = MediaType.APPLICATION_JSON
             content = body
         }.andExpect {
