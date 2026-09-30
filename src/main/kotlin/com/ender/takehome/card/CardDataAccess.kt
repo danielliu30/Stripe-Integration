@@ -23,6 +23,13 @@ class CardDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    fun findByIds(ids: Collection<Long>): List<Card> =
+        if (ids.isEmpty()) emptyList()
+        else dsl.selectFrom(CARDS)
+            .where(CARDS.ID.`in`(ids))
+            .fetch()
+            .map { it.toModel() }
+
     fun findByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Card> =
         dsl.selectFrom(CARDS)
             .where(CARDS.TENANT_ID.eq(tenantId))
