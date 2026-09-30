@@ -17,6 +17,12 @@ class CardDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    fun findByStripePaymentMethodId(paymentMethodId: String): Card? =
+        dsl.selectFrom(CARDS)
+            .where(CARDS.STRIPE_PAYMENT_METHOD_ID.eq(paymentMethodId))
+            .fetchOne()
+            ?.toModel()
+
     fun findByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Card> =
         dsl.selectFrom(CARDS)
             .where(CARDS.TENANT_ID.eq(tenantId))

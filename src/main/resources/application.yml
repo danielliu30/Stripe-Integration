@@ -20,6 +20,7 @@ jwt:
 
 stripe:
   secret-key: ${STRIPE_SECRET_KEY}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
   checkout-success-url: ${STRIPE_CHECKOUT_SUCCESS_URL:http://localhost:8080/api/checkout/return?status=success}
   checkout-cancel-url: ${STRIPE_CHECKOUT_CANCEL_URL:http://localhost:8080/api/checkout/return?status=cancelled}
 

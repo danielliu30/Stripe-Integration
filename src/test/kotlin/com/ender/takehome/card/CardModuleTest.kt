@@ -2,6 +2,8 @@ package com.ender.takehome.card
 
 import com.ender.takehome.TestFixtures
 import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.model.Card
+import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
 import io.mockk.every
@@ -43,6 +45,34 @@ class CardModuleTest {
         assertEquals("https://checkout.stripe.test/existing", url)
         verify(exactly = 0) { stripeService.createCustomer(any()) }
         verify(exactly = 0) { tenantDataAccess.save(any()) }
+    }
+
+    @Test
+    fun `persists card from setup intent`() {
+        val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_test")
+        every { cardDataAccess.findByStripePaymentMethodId("pm_test") } returns null
+        every { tenantDataAccess.findByStripeCustomerId("cus_test") } returns tenant
+        every { stripeService.getCardDetails("pm_test") } returns StripeCardDetails("visa", "4242", 12, 2030)
+        every { cardDataAccess.save(any()) } answers { firstArg() }
+
+        module.persistCardFromSetupIntent("cus_test", "pm_test")
+
+        verify {
+            cardDataAccess.save(match {
+                it.tenantId == tenant.id && it.stripePaymentMethodId == "pm_test" && it.last4 == "4242"
+            })
+        }
+    }
+
+    @Test
+    fun `ignores duplicate setup intent`() {
+        every { cardDataAccess.findByStripePaymentMethodId("pm_test") } returns
+            Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
+
+        module.persistCardFromSetupIntent("cus_test", "pm_test")
+
+        verify(exactly = 0) { stripeService.getCardDetails(any()) }
+        verify(exactly = 0) { cardDataAccess.save(any()) }
     }
 
     @Test
