@@ -23,6 +23,12 @@ class TenantDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    fun findByStripeCustomerId(customerId: String): Tenant? =
+        dsl.selectFrom(TENANTS)
+            .where(TENANTS.STRIPE_CUSTOMER_ID.eq(customerId))
+            .fetchOne()
+            ?.toModel()
+
     fun findAllCursor(startAfterId: Long?, limit: Int): List<Tenant> =
         dsl.selectFrom(TENANTS)
             .where(cursorCondition(startAfterId))

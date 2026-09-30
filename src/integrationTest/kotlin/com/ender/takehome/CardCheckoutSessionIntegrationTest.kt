@@ -1,6 +1,8 @@
 package com.ender.takehome
 
 import com.ender.takehome.model.Tenant
+import com.ender.takehome.stripe.SetupIntentSucceeded
+import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -62,6 +64,48 @@ class CardCheckoutSessionIntegrationTest {
     }
 
     @Test
+    fun `setup webhook persists card once and exposes it to tenant`() {
+        val login = mockMvc.post("/api/auth/login") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"email":"alice.johnson@email.com","password":"password"}"""
+        }.andReturn()
+        val token = objectMapper.readTree(login.response.contentAsString).get("token").asText()
+        mockMvc.post("/api/cards/checkout-session") {
+            header("Authorization", "Bearer $token")
+        }.andExpect { status { isOk() } }
+        stripeService.setupEvent = SetupIntentSucceeded("cus_test", "pm_test")
+
+        repeat(2) {
+            mockMvc.post("/api/webhooks/stripe") {
+                header("Stripe-Signature", "valid-signature")
+                contentType = MediaType.APPLICATION_JSON
+                content = "{}"
+            }.andExpect { status { isOk() } }
+        }
+
+        mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $token")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.content.length()") { value(1) }
+            jsonPath("$.content[0].brand") { value("visa") }
+            jsonPath("$.content[0].last4") { value("4242") }
+        }
+        assertEquals(1, stripeService.cardDetailsCalls)
+    }
+
+    @Test
+    fun `setup webhook rejects missing signature`() {
+        mockMvc.post("/api/webhooks/stripe") {
+            contentType = MediaType.APPLICATION_JSON
+            content = "{}"
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.message") { value("Missing Stripe-Signature header") }
+        }
+    }
+
+    @Test
     fun `checkout return reports submitted card details without authentication`() {
         mockMvc.get("/api/checkout/return")
             .andExpect {
@@ -91,6 +135,8 @@ class CardCheckoutSessionIntegrationTest {
 
     class FakeStripeService : StripeService {
         var createCustomerCalls = 0
+        var cardDetailsCalls = 0
+        var setupEvent: SetupIntentSucceeded? = null
         val checkoutCustomerIds = mutableListOf<String>()
 
         override fun createCustomer(tenant: Tenant): String {
@@ -101,6 +147,13 @@ class CardCheckoutSessionIntegrationTest {
         override fun createSetupCheckoutSession(customerId: String): String {
             checkoutCustomerIds += customerId
             return "https://checkout.stripe.test/session"
+        }
+
+        override fun parseSetupIntentSucceeded(payload: String, signature: String): SetupIntentSucceeded? = setupEvent
+
+        override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
+            cardDetailsCalls++
+            return StripeCardDetails("visa", "4242", 12, 2030)
         }
     }
 }

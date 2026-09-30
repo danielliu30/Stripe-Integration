@@ -32,4 +32,21 @@ class CardModule(
         }
         return stripeService.createSetupCheckoutSession(customerId)
     }
+
+    /** Persists safe card display data from an authenticated Stripe setup event. */
+    fun persistCardFromSetupIntent(customerId: String, paymentMethodId: String) {
+        if (dataAccess.findByStripePaymentMethodId(paymentMethodId) != null) return
+        val tenant = tenantDataAccess.findByStripeCustomerId(customerId) ?: return
+        val card = stripeService.getCardDetails(paymentMethodId)
+        dataAccess.save(
+            Card(
+                tenantId = tenant.id,
+                stripePaymentMethodId = paymentMethodId,
+                brand = card.brand,
+                last4 = card.last4,
+                expMonth = card.expMonth,
+                expYear = card.expYear,
+            )
+        )
+    }
 }
