@@ -160,7 +160,7 @@ tasks.named("processIntegrationTestResources") {
 }
 
 tasks.register<Test>("integrationTest") {
-    description = "Runs integration tests (requires Docker)."
+    description = "Runs deterministic integration tests (requires Docker)."
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
@@ -179,4 +179,15 @@ tasks.register<Test>("integrationTest") {
             environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
         }
     }
+}
+
+tasks.register<Test>("stripeIntegrationTest") {
+    description = "Runs real Stripe test-mode integration tests."
+    group = "verification"
+    testClassesDirs = sourceSets["integrationTest"].output.classesDirs
+    classpath = sourceSets["integrationTest"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("stripe")
+    }
+    shouldRunAfter(tasks.named("integrationTest"))
 }
