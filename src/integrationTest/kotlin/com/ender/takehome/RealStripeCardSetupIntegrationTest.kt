@@ -42,42 +42,47 @@ class RealStripeCardSetupIntegrationTest {
 
     @Test
     fun `creates checkout session and persists real Stripe card`() {
-        val token = login("alice.johnson@email.com")
-        val checkout = mockMvc.post("/api/cards/checkout-session") {
-            header("Authorization", "Bearer $token")
-        }.andExpect {
-            status { isOk() }
-            jsonPath("$.redirectUrl") { isString() }
-        }.andReturn()
-        val redirectUrl = objectMapper.readTree(checkout.response.contentAsString).get("redirectUrl").asText()
-        assertTrue(redirectUrl.startsWith("https://checkout.stripe.com/"))
+        var customerId: String? = null
+        try {
+            val token = login("alice.johnson@email.com")
+            val checkout = mockMvc.post("/api/cards/checkout-session") {
+                header("Authorization", "Bearer $token")
+            }.andExpect {
+                status { isOk() }
+                jsonPath("$.redirectUrl") { isString() }
+            }.andReturn()
+            val redirectUrl = objectMapper.readTree(checkout.response.contentAsString).get("redirectUrl").asText()
+            assertTrue(redirectUrl.startsWith("https://checkout.stripe.com/"))
 
-        val customerId = requireNotNull(tenantDataAccess.findById(1L)?.stripeCustomerId)
-        val paymentMethod = stripeClient.v1().paymentMethods().create(
-            PaymentMethodCreateParams.builder()
-                .setType(PaymentMethodCreateParams.Type.CARD)
-                .setCard(PaymentMethodCreateParams.Token.builder().setToken("tok_visa").build())
-                .build()
-        )
-        stripeClient.v1().paymentMethods().attach(
-            paymentMethod.id,
-            PaymentMethodAttachParams.builder().setCustomer(customerId).build(),
-        )
-        postSetupWebhook(customerId, paymentMethod.id)
+            customerId = requireNotNull(tenantDataAccess.findById(1L)?.stripeCustomerId)
+            val paymentMethod = stripeClient.v1().paymentMethods().create(
+                PaymentMethodCreateParams.builder()
+                    .setType(PaymentMethodCreateParams.Type.CARD)
+                    .setCard(PaymentMethodCreateParams.Token.builder().setToken("tok_visa").build())
+                    .build()
+            )
+            stripeClient.v1().paymentMethods().attach(
+                paymentMethod.id,
+                PaymentMethodAttachParams.builder().setCustomer(customerId).build(),
+            )
+            postSetupWebhook(customerId, paymentMethod.id)
 
-        val cards = mockMvc.get("/api/cards") {
-            header("Authorization", "Bearer $token")
-        }.andExpect {
-            status { isOk() }
-            jsonPath("$.content.length()") { value(1) }
-            jsonPath("$.content[0].brand") { value("visa") }
-            jsonPath("$.content[0].last4") { value("4242") }
-        }.andReturn()
-        val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+            val cards = mockMvc.get("/api/cards") {
+                header("Authorization", "Bearer $token")
+            }.andExpect {
+                status { isOk() }
+                jsonPath("$.content.length()") { value(1) }
+                jsonPath("$.content[0].brand") { value("visa") }
+                jsonPath("$.content[0].last4") { value("4242") }
+            }.andReturn()
+            val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
 
-        mockMvc.delete("/api/cards/$cardId") {
-            header("Authorization", "Bearer $token")
-        }.andExpect { status { isNoContent() } }
+            mockMvc.delete("/api/cards/$cardId") {
+                header("Authorization", "Bearer $token")
+            }.andExpect { status { isNoContent() } }
+        } finally {
+            customerId?.let { stripeClient.v1().customers().delete(it) }
+        }
     }
 
     private fun login(email: String): String {

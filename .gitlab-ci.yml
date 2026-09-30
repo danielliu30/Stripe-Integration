@@ -1,0 +1,46 @@
+stages:
+  - test
+
+variables:
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+
+cache:
+  key: gradle
+  paths:
+    - .gradle/caches
+    - .gradle/wrapper
+
+unit-and-integration:
+  stage: test
+  image: gradle:8.12.1-jdk17
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - ./gradlew test integrationTest --rerun-tasks --no-daemon
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - build/test-results/test/TEST-*.xml
+        - build/test-results/integrationTest/TEST-*.xml
+    paths:
+      - build/reports/tests/test
+      - build/reports/tests/integrationTest
+
+stripe-e2e:
+  stage: test
+  image: gradle:8.12.1-jdk17
+  resource_group: stripe-test-account
+  script:
+    - ./gradlew stripeIntegrationTest --rerun-tasks --no-daemon
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - build/test-results/stripeIntegrationTest/TEST-*.xml
+    paths:
+      - build/reports/tests/stripeIntegrationTest
