@@ -52,6 +52,21 @@ data class TenantResponse(
     }
 }
 
+data class CardResponse(
+    val id: Long,
+    val brand: String,
+    val last4: String,
+    val expMonth: Int,
+    val expYear: Int,
+    val createdAt: Instant,
+) {
+    companion object {
+        fun from(card: Card) = CardResponse(
+            card.id, card.brand, card.last4, card.expMonth, card.expYear, card.createdAt
+        )
+    }
+}
+
 data class LeaseResponse(
     val id: Long,
     val tenantId: Long,

@@ -4,6 +4,7 @@ import com.ender.takehome.generated.tables.Cards.CARDS
 import com.ender.takehome.generated.tables.records.CardsRecord
 import com.ender.takehome.model.Card
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 import org.springframework.stereotype.Component
 import java.time.ZoneOffset
 
@@ -15,6 +16,15 @@ class CardDataAccess(private val dsl: DSLContext) {
             .where(CARDS.ID.eq(id))
             .fetchOne()
             ?.toModel()
+
+    fun findByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Card> =
+        dsl.selectFrom(CARDS)
+            .where(CARDS.TENANT_ID.eq(tenantId))
+            .and(if (startAfterId != null) CARDS.ID.gt(startAfterId) else DSL.noCondition())
+            .orderBy(CARDS.ID)
+            .limit(limit)
+            .fetch()
+            .map { it.toModel() }
 
     fun save(card: Card): Card {
         val record = dsl.newRecord(CARDS).apply {

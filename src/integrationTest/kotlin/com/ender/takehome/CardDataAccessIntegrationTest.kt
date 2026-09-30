@@ -14,7 +14,7 @@ import java.sql.DriverManager
 class CardDataAccessIntegrationTest {
 
     @Test
-    fun `saves and finds card`() {
+    fun `saves finds and lists cards by tenant`() {
         val url = "jdbc:h2:mem:card-data-access;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
         Flyway.configure().dataSource(url, "sa", "").load().migrate()
 
@@ -30,8 +30,10 @@ class CardDataAccessIntegrationTest {
             )
 
             val saved = dataAccess.save(card)
+            dataAccess.save(card.copy(tenantId = 2L, stripePaymentMethodId = "pm_other_tenant"))
 
             assertEquals(saved, dataAccess.findById(saved.id))
+            assertEquals(listOf(saved), dataAccess.findByTenantIdCursor(1L, null, 20))
         }
     }
 }
