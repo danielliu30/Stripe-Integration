@@ -33,6 +33,16 @@ class CardModule(
         return stripeService.createSetupCheckoutSession(customerId)
     }
 
+    /** Detaches and removes a saved card owned by the authenticated tenant. */
+    fun delete(tenantId: Long, cardId: Long) {
+        val card = dataAccess.findById(cardId)
+        if (card == null || card.tenantId != tenantId) {
+            throw ResourceNotFoundException("Card not found: $cardId")
+        }
+        stripeService.detachPaymentMethod(card.stripePaymentMethodId)
+        dataAccess.delete(card.id)
+    }
+
     /** Persists safe card display data from an authenticated Stripe setup event. */
     fun persistCardFromSetupIntent(customerId: String, paymentMethodId: String) {
         if (dataAccess.findByStripePaymentMethodId(paymentMethodId) != null) return

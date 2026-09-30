@@ -48,6 +48,28 @@ class CardModuleTest {
     }
 
     @Test
+    fun `deletes tenant owned card from Stripe and database`() {
+        val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
+        every { cardDataAccess.findById(1L) } returns card
+        every { stripeService.detachPaymentMethod("pm_test") } returns Unit
+        every { cardDataAccess.delete(1L) } returns Unit
+
+        module.delete(1L, 1L)
+
+        verify { stripeService.detachPaymentMethod("pm_test") }
+        verify { cardDataAccess.delete(1L) }
+    }
+
+    @Test
+    fun `hides card owned by another tenant`() {
+        every { cardDataAccess.findById(1L) } returns Card(1L, 2L, "pm_test", "visa", "4242", 12, 2030)
+
+        assertThrows<ResourceNotFoundException> { module.delete(1L, 1L) }
+        verify(exactly = 0) { stripeService.detachPaymentMethod(any()) }
+        verify(exactly = 0) { cardDataAccess.delete(any()) }
+    }
+
+    @Test
     fun `persists card from setup intent`() {
         val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_test")
         every { cardDataAccess.findByStripePaymentMethodId("pm_test") } returns null
