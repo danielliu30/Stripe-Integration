@@ -20,6 +20,7 @@ jwt:
 stripe:
   secret-key: integration-test-placeholder
   webhook-secret: integration-webhook-placeholder
+  currency: usd
   checkout-success-url: http://localhost/api/checkout/return?status=success
   checkout-cancel-url: http://localhost/api/checkout/return?status=cancelled
 

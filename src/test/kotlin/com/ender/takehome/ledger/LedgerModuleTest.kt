@@ -2,16 +2,26 @@ package com.ender.takehome.ledger
 
 import com.ender.takehome.TestFixtures
 import com.ender.takehome.card.CardDataAccess
+import com.ender.takehome.config.TransactionHelper
 import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.RecordPaymentRequest
+import com.ender.takehome.exception.ConflictException
+import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.leasing.LeaseDataAccess
 import com.ender.takehome.model.Payment
+import com.ender.takehome.model.Card
 import com.ender.takehome.model.PaymentMethod
+import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentChargeStatus
 import com.ender.takehome.model.UserRole
+import com.ender.takehome.stripe.StripeChargeResult
+import com.ender.takehome.stripe.StripePaymentService
+import com.ender.takehome.tenant.TenantDataAccess
 import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -19,14 +29,31 @@ class LedgerModuleTest {
 
     private val dataAccess = mockk<LedgerDataAccess>()
     private val cardDataAccess = mockk<CardDataAccess>()
-    private val module = LedgerModule(dataAccess, cardDataAccess)
+    private val leaseDataAccess = mockk<LeaseDataAccess>()
+    private val tenantDataAccess = mockk<TenantDataAccess>()
+    private val stripeService = mockk<StripePaymentService>()
+    private val transactionHelper = mockk<TransactionHelper>()
+    private val module = LedgerModule(
+        dataAccess,
+        cardDataAccess,
+        leaseDataAccess,
+        tenantDataAccess,
+        stripeService,
+        transactionHelper,
+    )
 
     private val lease = TestFixtures.lease()
     private val rentCharge = TestFixtures.rentCharge()
+    private val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
+    private val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_test")
+    private val principal = UserPrincipal(2L, tenant.email, UserRole.TENANT, tenantId = 1L, pmId = null)
 
     @BeforeEach
     fun setUp() {
-        clearMocks(dataAccess, cardDataAccess)
+        clearMocks(dataAccess, cardDataAccess, leaseDataAccess, tenantDataAccess, stripeService, transactionHelper)
+        every { transactionHelper.executeWithRetry(any(), any(), any<() -> Any?>()) } answers {
+            thirdArg<() -> Any?>().invoke()
+        }
     }
 
     @Test
@@ -92,6 +119,60 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `payCharge hides another tenant rent charge`() {
+        every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease.copy(tenantId = 2L)
+
+        assertThrows<ResourceNotFoundException> {
+            module.payCharge(principal, rentCharge.id, card.id)
+        }
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `payCharge rejects an already paid rent charge`() {
+        every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns
+            rentCharge.copy(status = RentChargeStatus.PAID)
+        every { leaseDataAccess.findById(lease.id) } returns lease
+
+        assertThrows<ConflictException> {
+            module.payCharge(principal, rentCharge.id, card.id)
+        }
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `payCharge uses stable payment idempotency key and marks charge paid`() {
+        stubPaymentPreparation()
+        val initiated = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.INITIATED,
+            cardId = card.id,
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.savePayment(any()) } returns initiated
+        every {
+            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "payment-cus_test-10", any())
+        } returns StripeChargeResult("pi_test", PaymentStatus.SUCCEEDED, null)
+        every {
+            dataAccess.updatePaymentStatus(10L, PaymentStatus.SUCCEEDED, null, "pi_test")
+        } returns initiated.copy(status = PaymentStatus.SUCCEEDED, stripePaymentIntentId = "pi_test")
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { dataAccess.saveCharge(any()) } answers { firstArg() }
+
+        val result = module.payCharge(principal, rentCharge.id, card.id)
+
+        assertEquals(PaymentStatus.SUCCEEDED, result.payment.status)
+        verify(exactly = 1) {
+            stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "payment-cus_test-10", any())
+        }
+        verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+    }
+
+    @Test
     fun `recordPayment creates payment and marks charge as paid`() {
         val request = RecordPaymentRequest(
             rentChargeId = rentCharge.id,
@@ -111,5 +192,14 @@ class LedgerModuleTest {
         assertEquals(PaymentMethod.CHECK, result.paymentMethod)
         assertEquals("Check #1234", result.notes)
         verify(exactly = 1) { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+    }
+
+    private fun stubPaymentPreparation() {
+        every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { dataAccess.findInFlightPaymentByChargeId(rentCharge.id) } returns null
+        every { cardDataAccess.findById(card.id) } returns card
+        every { tenantDataAccess.findById(tenant.id) } returns tenant
+        every { dataAccess.sumSucceededPayments(rentCharge.id) } returns BigDecimal.ZERO
     }
 }

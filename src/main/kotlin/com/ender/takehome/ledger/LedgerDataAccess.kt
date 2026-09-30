@@ -13,6 +13,7 @@ import com.ender.takehome.model.RentChargeStatus
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Component
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -24,6 +25,14 @@ class LedgerDataAccess(private val dsl: DSLContext) {
     fun findChargeById(id: Long): RentCharge? =
         dsl.selectFrom(RENT_CHARGES)
             .where(RENT_CHARGES.ID.eq(id))
+            .fetchOne()
+            ?.toModel()
+
+    /** Locks the rent-charge row until the caller's transaction completes. */
+    fun findChargeByIdForUpdate(id: Long): RentCharge? =
+        dsl.selectFrom(RENT_CHARGES)
+            .where(RENT_CHARGES.ID.eq(id))
+            .forUpdate()
             .fetchOne()
             ?.toModel()
 
@@ -73,6 +82,22 @@ class LedgerDataAccess(private val dsl: DSLContext) {
 
     // --- Payment ---
 
+    /** Finds a non-terminal payment that must finish before another attempt can begin. */
+    fun findInFlightPaymentByChargeId(rentChargeId: Long): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
+            .and(PAYMENTS.STATUS.notIn(PaymentStatus.SUCCEEDED.name, PaymentStatus.FAILED.name, PaymentStatus.REFUNDED.name))
+            .fetchAny()
+            ?.toModel()
+
+    /** Calculates settled funds so the client can never choose the amount charged. */
+    fun sumSucceededPayments(rentChargeId: Long): BigDecimal =
+        dsl.select(DSL.coalesce(DSL.sum(PAYMENTS.AMOUNT), BigDecimal.ZERO))
+            .from(PAYMENTS)
+            .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
+            .and(PAYMENTS.STATUS.eq(PaymentStatus.SUCCEEDED.name))
+            .fetchOne(0, BigDecimal::class.java) ?: BigDecimal.ZERO
+
     fun findPaymentsByRentChargeIdCursor(rentChargeId: Long, startAfterId: Long?, limit: Int): List<Payment> =
         dsl.selectFrom(PAYMENTS)
             .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
@@ -120,6 +145,23 @@ class LedgerDataAccess(private val dsl: DSLContext) {
             return payment.copy(id = record.id!!)
         }
         return payment
+    }
+
+    fun updatePaymentStatus(
+        id: Long,
+        status: PaymentStatus,
+        failureReason: String?,
+        stripePaymentIntentId: String? = null,
+    ): Payment {
+        dsl.update(PAYMENTS)
+            .set(PAYMENTS.STATUS, status.name)
+            .set(PAYMENTS.FAILURE_REASON, failureReason)
+            .set(PAYMENTS.STRIPE_PAYMENT_INTENT_ID, stripePaymentIntentId)
+            .where(PAYMENTS.ID.eq(id))
+            .execute()
+        return requireNotNull(
+            dsl.selectFrom(PAYMENTS).where(PAYMENTS.ID.eq(id)).fetchOne()?.toModel()
+        )
     }
 
     // --- Cursor helpers ---
