@@ -2,6 +2,7 @@ package com.ender.takehome.ledger
 
 import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.GenerateRentChargesRequest
+import com.ender.takehome.dto.request.PayChargeRequest
 import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.dto.response.PaymentResponse
@@ -64,6 +65,21 @@ class LedgerApi(
     }
 
     // --- Payments ---
+
+    /**
+     * Starts a saved-card payment for the authenticated tenant.
+     * The request selects only the card; ownership and amount are derived on the server.
+     */
+    @PostMapping("/api/rent-charges/{id}/pay")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PreAuthorize("hasRole('TENANT')")
+    fun payCharge(
+        @PathVariable id: Long,
+        @Valid @RequestBody request: PayChargeRequest,
+    ): PaymentResponse {
+        val result = ledgerModule.payCharge(UserPrincipal.current(), id, request.cardId)
+        return PaymentResponse.from(result.payment, result.card)
+    }
 
     /** Lists payments visible to the authenticated tenant or property manager. */
     @GetMapping("/api/payments")

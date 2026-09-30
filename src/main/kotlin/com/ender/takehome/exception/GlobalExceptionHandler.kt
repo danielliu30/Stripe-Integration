@@ -23,6 +23,18 @@ class GlobalExceptionHandler {
             ErrorResponse(404, "Not Found", ex.message ?: "Resource not found")
         )
 
+    @ExceptionHandler(ConflictException::class)
+    fun handleConflict(ex: ConflictException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ErrorResponse(409, "Conflict", ex.message ?: "Request conflicts with current state")
+        )
+
+    @ExceptionHandler(UpstreamException::class)
+    fun handleUpstream(ex: UpstreamException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
+            ErrorResponse(502, "Bad Gateway", ex.message ?: "Upstream service unavailable")
+        )
+
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun handleValidation(ex: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
         val message = ex.bindingResult.fieldErrors.joinToString("; ") {

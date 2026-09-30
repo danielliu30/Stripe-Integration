@@ -1,13 +1,17 @@
 package com.ender.takehome.stripe
 
+import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.Tenant
 import com.stripe.StripeClient
 import com.stripe.model.SetupIntent
+import com.stripe.net.RequestOptions
 import com.stripe.net.Webhook
 import com.stripe.param.CustomerCreateParams
+import com.stripe.param.PaymentIntentCreateParams
 import com.stripe.param.checkout.SessionCreateParams
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
+import java.math.BigDecimal
 
 data class StripeCardDetails(
     val brand: String,
@@ -19,6 +23,12 @@ data class StripeCardDetails(
 data class SetupIntentSucceeded(
     val customerId: String,
     val paymentMethodId: String,
+)
+
+data class StripeChargeResult(
+    val paymentIntentId: String,
+    val status: PaymentStatus,
+    val failureReason: String?,
 )
 
 /**
@@ -42,13 +52,35 @@ interface StripeService {
     fun detachPaymentMethod(paymentMethodId: String)
 }
 
+/** Stripe boundary used only for charging previously saved payment methods. */
+interface StripePaymentService {
+    /**
+     * Creates and confirms an off-session card PaymentIntent.
+     *
+     * [idempotencyKey] must be stable for the persisted local payment. Stripe returns the
+     * original PaymentIntent when the same key and parameters are retried, preventing a second
+     * external charge even if the first response was lost.
+     *
+     * [metadata] links the Stripe object back to local payment and rent-charge records for
+     * support, reconciliation, and later webhook processing.
+     */
+    fun chargeCard(
+        customerId: String,
+        paymentMethodId: String,
+        amount: BigDecimal,
+        idempotencyKey: String,
+        metadata: Map<String, String>,
+    ): StripeChargeResult
+}
+
 @Component
 class StripeServiceImpl(
     @Value("\${stripe.secret-key}") secretKey: String,
     @Value("\${stripe.webhook-secret}") private val webhookSecret: String,
+    @Value("\${stripe.currency}") private val currency: String,
     @Value("\${stripe.checkout-success-url}") private val successUrl: String,
     @Value("\${stripe.checkout-cancel-url}") private val cancelUrl: String,
-) : StripeService {
+) : StripeService, StripePaymentService {
 
     private val client = StripeClient(secretKey)
 
@@ -89,5 +121,34 @@ class StripeServiceImpl(
 
     override fun detachPaymentMethod(paymentMethodId: String) {
         client.v1().paymentMethods().detach(paymentMethodId)
+    }
+
+    override fun chargeCard(
+        customerId: String,
+        paymentMethodId: String,
+        amount: BigDecimal,
+        idempotencyKey: String,
+        metadata: Map<String, String>,
+    ): StripeChargeResult {
+        val builder = PaymentIntentCreateParams.builder()
+            .setAmount(amount.movePointRight(2).longValueExact())
+            .setCurrency(currency)
+            .setCustomer(customerId)
+            .setPaymentMethod(paymentMethodId)
+            .setReturnUrl(successUrl)
+            .setOffSession(true)
+            .addPaymentMethodType("card")
+            .setConfirm(true)
+        metadata.forEach { (key, value) -> builder.putMetadata(key, value) }
+        val params = builder.build()
+        val options = RequestOptions.builder().setIdempotencyKey(idempotencyKey).build()
+        val paymentIntent = client.v1().paymentIntents().create(params, options)
+        val status = when (paymentIntent.status) {
+            "succeeded" -> PaymentStatus.SUCCEEDED
+            "processing" -> PaymentStatus.PROCESSING
+            "requires_action" -> PaymentStatus.REQUIRES_ACTION
+            else -> PaymentStatus.FAILED
+        }
+        return StripeChargeResult(paymentIntent.id, status, paymentIntent.lastPaymentError?.message)
     }
 }

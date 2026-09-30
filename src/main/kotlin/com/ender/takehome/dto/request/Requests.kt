@@ -38,6 +38,10 @@ data class CreateLeaseRequest(
     @field:NotNull val endDate: LocalDate,
 )
 
+data class PayChargeRequest(
+    @field:NotNull val cardId: Long,
+)
+
 data class RecordPaymentRequest(
     @field:NotNull val rentChargeId: Long,
     @field:NotNull @field:DecimalMin("0.01") val amount: BigDecimal,

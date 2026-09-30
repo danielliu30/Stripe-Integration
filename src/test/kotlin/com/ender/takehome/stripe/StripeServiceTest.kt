@@ -14,6 +14,7 @@ class StripeServiceTest {
     private val service = StripeServiceImpl(
         secretKey = "unit-test-placeholder",
         webhookSecret = webhookSecret,
+        currency = "usd",
         successUrl = "http://localhost/success",
         cancelUrl = "http://localhost/cancel",
     )

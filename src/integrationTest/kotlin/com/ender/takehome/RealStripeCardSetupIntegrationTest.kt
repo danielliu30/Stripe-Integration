@@ -1,11 +1,16 @@
 package com.ender.takehome
 
+import com.ender.takehome.ledger.LedgerDataAccess
+import com.ender.takehome.model.RentCharge
+import com.ender.takehome.stripe.StripePaymentService
 import com.ender.takehome.tenant.TenantDataAccess
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.stripe.Stripe
 import com.stripe.StripeClient
+import com.stripe.param.PaymentIntentListParams
 import com.stripe.param.PaymentMethodAttachParams
 import com.stripe.param.PaymentMethodCreateParams
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -19,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -39,6 +46,12 @@ class RealStripeCardSetupIntegrationTest {
 
     @Autowired
     private lateinit var tenantDataAccess: TenantDataAccess
+
+    @Autowired
+    private lateinit var ledgerDataAccess: LedgerDataAccess
+
+    @Autowired
+    private lateinit var stripePaymentService: StripePaymentService
 
     @Test
     fun `creates checkout session and persists real Stripe card`() {
@@ -84,6 +97,76 @@ class RealStripeCardSetupIntegrationTest {
             customerId?.let { stripeClient.v1().customers().delete(it) }
         }
     }
+
+    @Test
+    fun `charges real Stripe card and verifies Stripe idempotency`() {
+        var customerId: String? = null
+        try {
+            val token = login("bob.smith@email.com")
+            mockMvc.post("/api/cards/checkout-session") {
+                header("Authorization", "Bearer $token")
+            }.andExpect { status { isOk() } }
+            customerId = requireNotNull(tenantDataAccess.findById(2L)?.stripeCustomerId)
+            val paymentMethod = stripeClient.v1().paymentMethods().create(
+                PaymentMethodCreateParams.builder()
+                    .setType(PaymentMethodCreateParams.Type.CARD)
+                    .setCard(PaymentMethodCreateParams.Token.builder().setToken("tok_visa").build())
+                    .build()
+            )
+            stripeClient.v1().paymentMethods().attach(
+                paymentMethod.id,
+                PaymentMethodAttachParams.builder().setCustomer(customerId).build(),
+            )
+            postSetupWebhook(customerId, paymentMethod.id)
+            val cards = mockMvc.get("/api/cards") {
+                header("Authorization", "Bearer $token")
+            }.andReturn()
+            val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+            val charge = ledgerDataAccess.saveCharge(
+                RentCharge(leaseId = 2L, amount = BigDecimal("1.00"), dueDate = LocalDate.of(2099, 1, 1))
+            )
+            pay(token, charge.id, cardId)
+            assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
+
+            val stripeIdempotencyKey = "real-stripe-${UUID.randomUUID()}"
+            val metadata = mapOf("idempotencyTest" to stripeIdempotencyKey)
+            val firstStripeCharge = stripePaymentService.chargeCard(
+                customerId,
+                paymentMethod.id,
+                BigDecimal("1.00"),
+                stripeIdempotencyKey,
+                metadata,
+            )
+            val secondStripeCharge = stripePaymentService.chargeCard(
+                customerId,
+                paymentMethod.id,
+                BigDecimal("1.00"),
+                stripeIdempotencyKey,
+                metadata,
+            )
+            assertEquals(firstStripeCharge.paymentIntentId, secondStripeCharge.paymentIntentId)
+            val paymentIntents = stripeClient.v1().paymentIntents().list(
+                PaymentIntentListParams.builder().setCustomer(customerId).setLimit(100L).build()
+            )
+            assertEquals(
+                1,
+                paymentIntents.data.count { it.metadata["rentChargeId"] == charge.id.toString() },
+            )
+        } finally {
+            customerId?.let { stripeClient.v1().customers().delete(it) }
+        }
+    }
+
+    private fun pay(token: String, chargeId: Long, cardId: Long): String =
+        mockMvc.post("/api/rent-charges/$chargeId/pay") {
+            header("Authorization", "Bearer $token")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"cardId":$cardId}"""
+        }.andExpect {
+            status { isAccepted() }
+            jsonPath("$.paymentMethod") { value("CREDIT_CARD") }
+            jsonPath("$.status") { value("SUCCEEDED") }
+        }.andReturn().response.contentAsString
 
     private fun login(email: String): String {
         val response = mockMvc.post("/api/auth/login") {
