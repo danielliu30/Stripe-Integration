@@ -20,6 +20,7 @@ import com.ender.takehome.stripe.StripePaymentService
 import com.ender.takehome.tenant.TenantDataAccess
 import com.stripe.exception.CardException
 import com.stripe.exception.StripeException
+import org.jooq.exception.IntegrityConstraintViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -100,21 +101,28 @@ class LedgerModule(
      * payment. The Stripe network call deliberately runs outside that transaction so a slow
      * dependency cannot hold a database lock. Settlement then runs in a second transaction.
      *
-     * Stripe receives `payment-{customerId}-{paymentId}` as its idempotency key. The persisted
-     * IDs make that key stable for internal retries and unique across tenants and environments.
-     * Client request replay and database duplicate-key recovery are intentionally deferred to
-     * the follow-up request-idempotency change.
+     * The client idempotency key is checked before preparation and stored on the payment. A
+     * database uniqueness violation handles concurrent requests that both miss the first lookup.
+     * Replays return the existing tenant-owned payment without contacting Stripe again.
      */
     fun payCharge(
         principal: UserPrincipal,
         chargeId: Long,
         cardId: Long,
+        idempotencyKey: String,
     ): PaymentResult {
         val tenantId = principal.tenantId
             ?: throw ResourceNotFoundException("Rent charge not found: $chargeId")
+        val replay = dataAccess.findPaymentByIdempotencyKey(idempotencyKey)
+        if (replay != null) return replayPayment(replay, tenantId, chargeId)
 
-        val prepared = transactionHelper.executeWithRetry {
-            preparePayment(tenantId, principal.email, chargeId, cardId)
+        val prepared = try {
+            transactionHelper.executeWithRetry {
+                preparePayment(tenantId, principal.email, chargeId, cardId, idempotencyKey)
+            }
+        } catch (exception: IntegrityConstraintViolationException) {
+            val existing = dataAccess.findPaymentByIdempotencyKey(idempotencyKey) ?: throw exception
+            return replayPayment(existing, tenantId, chargeId)
         }
 
         val stripeResult = try {
@@ -122,7 +130,7 @@ class LedgerModule(
                 customerId = prepared.customerId,
                 paymentMethodId = prepared.card.stripePaymentMethodId,
                 amount = prepared.payment.amount,
-                idempotencyKey = "payment-${prepared.customerId}-${prepared.payment.id}",
+                idempotencyKey = idempotencyKey,
                 metadata = mapOf(
                     "paymentId" to prepared.payment.id.toString(),
                     "rentChargeId" to chargeId.toString(),
@@ -165,6 +173,7 @@ class LedgerModule(
         recordedBy: String,
         chargeId: Long,
         cardId: Long,
+        idempotencyKey: String,
     ): PreparedPayment {
         val charge = dataAccess.findChargeByIdForUpdate(chargeId)
             ?: throw ResourceNotFoundException("Rent charge not found: $chargeId")
@@ -197,6 +206,7 @@ class LedgerModule(
                 paymentMethod = PaymentMethod.CREDIT_CARD,
                 status = PaymentStatus.INITIATED,
                 cardId = cardId,
+                idempotencyKey = idempotencyKey,
                 recordedBy = recordedBy,
             )
         )
@@ -216,6 +226,18 @@ class LedgerModule(
             dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PAID))
         }
         return payment
+    }
+
+    private fun replayPayment(payment: Payment, tenantId: Long, chargeId: Long): PaymentResult {
+        if (payment.rentChargeId != chargeId) {
+            throw ConflictException("Idempotency key was already used for another rent charge")
+        }
+        val charge = dataAccess.findChargeById(chargeId)
+        val lease = if (charge != null) leaseDataAccess.findById(charge.leaseId) else null
+        if (lease == null || lease.tenantId != tenantId) {
+            throw ResourceNotFoundException("Rent charge not found: $chargeId")
+        }
+        return PaymentResult(payment, payment.cardId?.let { cardDataAccess.findById(it) })
     }
 
     private data class PreparedPayment(
