@@ -1,5 +1,6 @@
 package com.ender.takehome.ledger
 
+import com.ender.takehome.generated.tables.Leases.LEASES
 import com.ender.takehome.generated.tables.Payments.PAYMENTS
 import com.ender.takehome.generated.tables.RentCharges.RENT_CHARGES
 import com.ender.takehome.generated.tables.records.PaymentsRecord
@@ -76,6 +77,26 @@ class LedgerDataAccess(private val dsl: DSLContext) {
         dsl.selectFrom(PAYMENTS)
             .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))
             .and(paymentCursorCondition(startAfterId))
+            .orderBy(PAYMENTS.ID)
+            .limit(limit)
+            .fetch()
+            .map { it.toModel() }
+
+    fun findPaymentsByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Payment> =
+        dsl.select(PAYMENTS.fields().toList())
+            .from(PAYMENTS)
+            .join(RENT_CHARGES).on(RENT_CHARGES.ID.eq(PAYMENTS.RENT_CHARGE_ID))
+            .join(LEASES).on(LEASES.ID.eq(RENT_CHARGES.LEASE_ID))
+            .where(LEASES.TENANT_ID.eq(tenantId))
+            .and(paymentCursorCondition(startAfterId))
+            .orderBy(PAYMENTS.ID)
+            .limit(limit)
+            .fetchInto(PaymentsRecord::class.java)
+            .map { it.toModel() }
+
+    fun findAllPaymentsCursor(startAfterId: Long?, limit: Int): List<Payment> =
+        dsl.selectFrom(PAYMENTS)
+            .where(paymentCursorCondition(startAfterId))
             .orderBy(PAYMENTS.ID)
             .limit(limit)
             .fetch()

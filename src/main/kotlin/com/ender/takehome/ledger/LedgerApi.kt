@@ -1,5 +1,6 @@
 package com.ender.takehome.ledger
 
+import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.GenerateRentChargesRequest
 import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.dto.response.CursorPage
@@ -62,7 +63,23 @@ class LedgerApi(
         jobPublisher.publish(BackgroundJobRequest(BackgroundJobType.GENERATE_RENT_CHARGES, params))
     }
 
-    // --- Manual Payments ---
+    // --- Payments ---
+
+    /** Lists payments visible to the authenticated tenant or property manager. */
+    @GetMapping("/api/payments")
+    fun listPayments(
+        @RequestParam(required = false) startAfterId: Long?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): CursorPage<PaymentResponse> {
+        val page = ledgerModule.getPayments(startAfterId, limit, UserPrincipal.current())
+        val cards = ledgerModule.resolveCards(page.content)
+        return CursorPage(
+            page.content.map { payment ->
+                PaymentResponse.from(payment, payment.cardId?.let { cards[it] })
+            },
+            page.hasMore,
+        )
+    }
 
     @GetMapping("/api/payments", params = ["rentChargeId"])
     @PreAuthorize("hasRole('PROPERTY_MANAGER')")

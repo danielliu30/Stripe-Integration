@@ -107,13 +107,25 @@ data class PaymentResponse(
     val rentChargeId: Long,
     val amount: BigDecimal,
     val paymentMethod: PaymentMethod,
+    val status: PaymentStatus,
+    val card: CardResponse?,
+    val failureReason: String?,
     val notes: String?,
     val recordedBy: String,
     val createdAt: Instant,
 ) {
     companion object {
-        fun from(p: Payment) = PaymentResponse(
-            p.id, p.rentChargeId, p.amount, p.paymentMethod, p.notes, p.recordedBy, p.createdAt
+        fun from(payment: Payment, card: Card? = null) = PaymentResponse(
+            id = payment.id,
+            rentChargeId = payment.rentChargeId,
+            amount = payment.amount,
+            paymentMethod = payment.paymentMethod,
+            status = payment.status,
+            card = card?.let { CardResponse.from(it) },
+            failureReason = payment.failureReason,
+            notes = payment.notes,
+            recordedBy = payment.recordedBy,
+            createdAt = payment.createdAt,
         )
     }
 }
