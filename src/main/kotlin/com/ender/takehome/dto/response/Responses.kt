@@ -52,6 +52,9 @@ data class TenantResponse(
     }
 }
 
+/** Client navigation target for Stripe's hosted card-setup page. */
+data class CheckoutSessionResponse(val redirectUrl: String)
+
 data class CardResponse(
     val id: Long,
     val brand: String,

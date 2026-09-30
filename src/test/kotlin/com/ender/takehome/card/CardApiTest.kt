@@ -23,6 +23,18 @@ class CardApiTest {
     }
 
     @Test
+    fun `creates checkout session for authenticated tenant`() {
+        val principal = UserPrincipal(2L, "tenant@test.com", UserRole.TENANT, tenantId = 1L, pmId = null)
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, principal.authorities)
+        every { cardModule.createSetupCheckoutSession(1L) } returns "https://checkout.stripe.test/session"
+
+        val result = api.createCheckoutSession()
+
+        assertEquals("https://checkout.stripe.test/session", result.redirectUrl)
+    }
+
+    @Test
     fun `lists cards for authenticated tenant`() {
         val principal = UserPrincipal(2L, "tenant@test.com", UserRole.TENANT, tenantId = 1L, pmId = null)
         SecurityContextHolder.getContext().authentication =

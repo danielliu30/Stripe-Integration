@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:integrationdb;DB_CLOSE_DELAY=-1;MODE=MYSQL;CASE_INSENSITIVE_IDENTIFIERS=true
+    url: jdbc:h2:mem:integrationdb;DB_CLOSE_DELAY=-1;MODE=MYSQL;DATABASE_TO_LOWER=TRUE
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -16,6 +16,11 @@ spring:
 jwt:
   secret: test-jwt-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256
   expiration-ms: 86400000
+
+stripe:
+  secret-key: integration-test-placeholder
+  checkout-success-url: http://localhost/api/checkout/return?status=success
+  checkout-cancel-url: http://localhost/api/checkout/return?status=cancelled
 
 aws:
   region: us-east-1
