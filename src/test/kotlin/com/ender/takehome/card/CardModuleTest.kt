@@ -1,0 +1,55 @@
+package com.ender.takehome.card
+
+import com.ender.takehome.TestFixtures
+import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.stripe.StripeService
+import com.ender.takehome.tenant.TenantDataAccess
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+
+class CardModuleTest {
+
+    private val cardDataAccess = mockk<CardDataAccess>()
+    private val tenantDataAccess = mockk<TenantDataAccess>()
+    private val stripeService = mockk<StripeService>()
+    private val module = CardModule(cardDataAccess, tenantDataAccess, stripeService)
+
+    @Test
+    fun `creates Stripe customer before first checkout session`() {
+        val tenant = TestFixtures.tenant(id = 1L)
+        every { tenantDataAccess.findById(1L) } returns tenant
+        every { stripeService.createCustomer(tenant) } returns "cus_new"
+        every { tenantDataAccess.save(any()) } answers { firstArg() }
+        every { stripeService.createSetupCheckoutSession("cus_new") } returns "https://checkout.stripe.test/new"
+
+        val url = module.createSetupCheckoutSession(1L)
+
+        assertEquals("https://checkout.stripe.test/new", url)
+        verify { tenantDataAccess.save(tenant.copy(stripeCustomerId = "cus_new")) }
+    }
+
+    @Test
+    fun `reuses existing Stripe customer for checkout session`() {
+        val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_existing")
+        every { tenantDataAccess.findById(1L) } returns tenant
+        every { stripeService.createSetupCheckoutSession("cus_existing") } returns "https://checkout.stripe.test/existing"
+
+        val url = module.createSetupCheckoutSession(1L)
+
+        assertEquals("https://checkout.stripe.test/existing", url)
+        verify(exactly = 0) { stripeService.createCustomer(any()) }
+        verify(exactly = 0) { tenantDataAccess.save(any()) }
+    }
+
+    @Test
+    fun `rejects checkout session for missing tenant`() {
+        every { tenantDataAccess.findById(99L) } returns null
+
+        assertThrows<ResourceNotFoundException> { module.createSetupCheckoutSession(99L) }
+        verify(exactly = 0) { stripeService.createSetupCheckoutSession(any()) }
+    }
+}

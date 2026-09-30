@@ -18,6 +18,11 @@ jwt:
   secret: take-home-jwt-secret-key-that-is-at-least-256-bits-long-for-hmac-sha
   expiration-ms: 86400000  # 24 hours
 
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY}
+  checkout-success-url: ${STRIPE_CHECKOUT_SUCCESS_URL:http://localhost:8080/api/checkout/return?status=success}
+  checkout-cancel-url: ${STRIPE_CHECKOUT_CANCEL_URL:http://localhost:8080/api/checkout/return?status=cancelled}
+
 aws:
   region: us-east-1
   s3:
