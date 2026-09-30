@@ -6,6 +6,7 @@ import com.ender.takehome.model.Card
 import com.ender.takehome.model.UserRole
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -20,6 +21,18 @@ class CardApiTest {
     @AfterEach
     fun clearSecurityContext() {
         SecurityContextHolder.clearContext()
+    }
+
+    @Test
+    fun `deletes card for authenticated tenant`() {
+        val principal = UserPrincipal(2L, "tenant@test.com", UserRole.TENANT, tenantId = 1L, pmId = null)
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(principal, null, principal.authorities)
+        every { cardModule.delete(1L, 5L) } returns Unit
+
+        api.delete(5L)
+
+        verify { cardModule.delete(1L, 5L) }
     }
 
     @Test

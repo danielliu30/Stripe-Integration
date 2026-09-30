@@ -32,6 +32,12 @@ class CardDataAccess(private val dsl: DSLContext) {
             .fetch()
             .map { it.toModel() }
 
+    fun delete(id: Long) {
+        dsl.deleteFrom(CARDS)
+            .where(CARDS.ID.eq(id))
+            .execute()
+    }
+
     fun save(card: Card): Card {
         val record = dsl.newRecord(CARDS).apply {
             tenantId = card.tenantId

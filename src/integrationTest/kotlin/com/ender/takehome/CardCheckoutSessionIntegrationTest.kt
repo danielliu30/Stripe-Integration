@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.transaction.annotation.Transactional
@@ -64,7 +65,7 @@ class CardCheckoutSessionIntegrationTest {
     }
 
     @Test
-    fun `setup webhook persists card once and exposes it to tenant`() {
+    fun `setup webhook persists card once and tenant can delete it`() {
         val login = mockMvc.post("/api/auth/login") {
             contentType = MediaType.APPLICATION_JSON
             content = """{"email":"alice.johnson@email.com","password":"password"}"""
@@ -83,15 +84,27 @@ class CardCheckoutSessionIntegrationTest {
             }.andExpect { status { isOk() } }
         }
 
-        mockMvc.get("/api/cards") {
+        val cards = mockMvc.get("/api/cards") {
             header("Authorization", "Bearer $token")
         }.andExpect {
             status { isOk() }
             jsonPath("$.content.length()") { value(1) }
             jsonPath("$.content[0].brand") { value("visa") }
             jsonPath("$.content[0].last4") { value("4242") }
+        }.andReturn()
+        val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+
+        mockMvc.delete("/api/cards/$cardId") {
+            header("Authorization", "Bearer $token")
+        }.andExpect { status { isNoContent() } }
+        mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $token")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.content.length()") { value(0) }
         }
         assertEquals(1, stripeService.cardDetailsCalls)
+        assertEquals(listOf("pm_test"), stripeService.detachedPaymentMethodIds)
     }
 
     @Test
@@ -138,6 +151,7 @@ class CardCheckoutSessionIntegrationTest {
         var cardDetailsCalls = 0
         var setupEvent: SetupIntentSucceeded? = null
         val checkoutCustomerIds = mutableListOf<String>()
+        val detachedPaymentMethodIds = mutableListOf<String>()
 
         override fun createCustomer(tenant: Tenant): String {
             createCustomerCalls++
@@ -154,6 +168,10 @@ class CardCheckoutSessionIntegrationTest {
         override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
             cardDetailsCalls++
             return StripeCardDetails("visa", "4242", 12, 2030)
+        }
+
+        override fun detachPaymentMethod(paymentMethodId: String) {
+            detachedPaymentMethodIds += paymentMethodId
         }
     }
 }

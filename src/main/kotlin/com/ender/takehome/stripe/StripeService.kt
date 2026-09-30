@@ -37,6 +37,9 @@ interface StripeService {
 
     /** Retrieves the non-sensitive display fields for a Stripe card PaymentMethod. */
     fun getCardDetails(paymentMethodId: String): StripeCardDetails
+
+    /** Detaches a saved PaymentMethod so it can no longer be charged for the tenant. */
+    fun detachPaymentMethod(paymentMethodId: String)
 }
 
 @Component
@@ -82,5 +85,9 @@ class StripeServiceImpl(
         val card = client.v1().paymentMethods().retrieve(paymentMethodId).card
             ?: throw IllegalArgumentException("Payment method is not a card")
         return StripeCardDetails(card.brand, card.last4, card.expMonth.toInt(), card.expYear.toInt())
+    }
+
+    override fun detachPaymentMethod(paymentMethodId: String) {
+        client.v1().paymentMethods().detach(paymentMethodId)
     }
 }
