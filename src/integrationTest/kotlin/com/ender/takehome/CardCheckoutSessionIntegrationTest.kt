@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.transaction.annotation.Transactional
 
@@ -58,6 +59,27 @@ class CardCheckoutSessionIntegrationTest {
         assertEquals("cus_test", tenantDataAccess.findById(1L)?.stripeCustomerId)
         assertEquals(1, stripeService.createCustomerCalls)
         assertEquals(listOf("cus_test", "cus_test"), stripeService.checkoutCustomerIds)
+    }
+
+    @Test
+    fun `checkout return reports submitted card details without authentication`() {
+        mockMvc.get("/api/checkout/return")
+            .andExpect {
+                status { isOk() }
+                jsonPath("$.status") { value("success") }
+                jsonPath("$.message") { value("Card details submitted. Your card will appear after confirmation.") }
+            }
+    }
+
+    @Test
+    fun `checkout return reports cancellation without authentication`() {
+        mockMvc.get("/api/checkout/return") {
+            param("status", "cancelled")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.status") { value("cancelled") }
+            jsonPath("$.message") { value("Card setup was cancelled. No card was saved.") }
+        }
     }
 
     @TestConfiguration(proxyBeanMethods = false)
