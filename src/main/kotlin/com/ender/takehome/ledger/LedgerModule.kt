@@ -21,6 +21,7 @@ import com.ender.takehome.tenant.TenantDataAccess
 import com.stripe.exception.CardException
 import com.stripe.exception.StripeException
 import org.jooq.exception.IntegrityConstraintViolationException
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -45,6 +46,8 @@ class LedgerModule(
     private val recoveryDataAccess: PaymentRecoveryDataAccess,
     @Value("\${payment-recovery.initial-delay-seconds:30}") private val recoveryDelaySeconds: Long = 30,
 ) {
+    private val log = LoggerFactory.getLogger(LedgerModule::class.java)
+
     init {
         require(recoveryDelaySeconds >= 0) { "Payment recovery delay must not be negative" }
     }
@@ -111,8 +114,9 @@ class LedgerModule(
      *
      * The client idempotency key is checked before preparation and stored on the payment. A
      * database uniqueness violation handles concurrent requests that both miss the first lookup.
-     * Known-state replays return immediately; an `INITIATED` replay safely invokes the same recovery
-     * operation and Stripe idempotency key while durable queue dispatch is introduced separately.
+     * Every replay returns the existing tenant-owned payment without another Stripe call. If the
+     * initial outcome is unknown, its `INITIATED` payment and pending recovery are already durably
+     * owned and will be dispatched asynchronously.
      */
     fun payCharge(
         principal: UserPrincipal,
@@ -123,12 +127,7 @@ class LedgerModule(
         val tenantId = principal.tenantId
             ?: throw ResourceNotFoundException("Rent charge not found: $chargeId")
         val replay = dataAccess.findPaymentByIdempotencyKey(idempotencyKey)
-        if (replay != null) {
-            val result = replayPayment(replay, tenantId, chargeId)
-            return if (replay.status == PaymentStatus.INITIATED) {
-                executeInitiatedPayment(replay.id) ?: result
-            } else result
-        }
+        if (replay != null) return replayPayment(replay, tenantId, chargeId)
 
         val prepared = try {
             transactionHelper.executeWithRetry {
@@ -152,7 +151,12 @@ class LedgerModule(
             }
             return PaymentResult(failed, prepared.card)
         } catch (exception: StripeException) {
-            throw UpstreamException("Payment processor unavailable; recovery remains pending", exception)
+            log.warn(
+                "Stripe outcome unknown for payment {}; durable recovery remains pending",
+                prepared.payment.id,
+                exception,
+            )
+            return PaymentResult(prepared.payment, prepared.card)
         }
 
         val settled = transactionHelper.executeWithRetry {

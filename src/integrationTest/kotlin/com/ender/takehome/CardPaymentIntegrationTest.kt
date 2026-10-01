@@ -114,7 +114,7 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
-    fun `uncertain Stripe failure leaves payment initiated and recovery pending`() {
+    fun `uncertain Stripe failure returns accepted initiated payment with recovery pending`() {
         val tenant = requireNotNull(tenantDataAccess.findById(1L))
         tenantDataAccess.save(tenant.copy(stripeCustomerId = "cus_alice_pending"))
         val card = cardDataAccess.save(
@@ -133,23 +133,32 @@ class CardPaymentIntegrationTest {
         stripeService.failNextCharge = true
         val token = login("alice.johnson@email.com")
 
-        mockMvc.post("/api/rent-charges/${charge.id}/pay") {
+        val response = mockMvc.post("/api/rent-charges/${charge.id}/pay") {
             header("Authorization", "Bearer $token")
             header("Idempotency-Key", "pending-recovery-key")
             contentType = MediaType.APPLICATION_JSON
             content = """{"cardId":${card.id}}"""
-        }.andExpect { status { isBadGateway() } }
+        }.andExpect {
+            status { isAccepted() }
+            jsonPath("$.status") { value("INITIATED") }
+        }.andReturn().response.contentAsString
 
         val payment = ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).single()
+        assertEquals(payment.id, objectMapper.readTree(response).get("id").asLong())
         assertEquals(PaymentStatus.INITIATED, payment.status)
         assertEquals(PaymentRecoveryStatus.PENDING, recoveryDataAccess.findByPaymentId(payment.id)?.status)
 
-        val recovered = objectMapper.readTree(
-            pay(token, charge.id, """{"cardId":${card.id}}""", "pending-recovery-key")
-        )
-        assertEquals(payment.id, recovered.get("id").asLong())
-        assertEquals("SUCCEEDED", recovered.get("status").asText())
-        assertEquals(PaymentRecoveryStatus.COMPLETED, recoveryDataAccess.findByPaymentId(payment.id)?.status)
+        val replay = mockMvc.post("/api/rent-charges/${charge.id}/pay") {
+            header("Authorization", "Bearer $token")
+            header("Idempotency-Key", "pending-recovery-key")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"cardId":${card.id}}"""
+        }.andExpect {
+            status { isAccepted() }
+            jsonPath("$.status") { value("INITIATED") }
+        }.andReturn().response.contentAsString
+        assertEquals(payment.id, objectMapper.readTree(replay).get("id").asLong())
+        assertEquals(1, stripeService.chargeCalls)
     }
 
     @Test
@@ -271,22 +280,18 @@ class CardPaymentIntegrationTest {
         }
     }
 
-    private fun pay(
-        token: String,
-        chargeId: Long,
-        body: String,
-        idempotencyKey: String = "e2e-request-key",
-    ): String = mockMvc.post("/api/rent-charges/$chargeId/pay") {
-        header("Authorization", "Bearer $token")
-        header("Idempotency-Key", idempotencyKey)
-        contentType = MediaType.APPLICATION_JSON
-        content = body
-    }.andExpect {
-        status { isAccepted() }
-        jsonPath("$.paymentMethod") { value("CREDIT_CARD") }
-        jsonPath("$.status") { value("SUCCEEDED") }
-        jsonPath("$.recordedBy") { value("alice.johnson@email.com") }
-    }.andReturn().response.contentAsString
+    private fun pay(token: String, chargeId: Long, body: String): String =
+        mockMvc.post("/api/rent-charges/$chargeId/pay") {
+            header("Authorization", "Bearer $token")
+            header("Idempotency-Key", "e2e-request-key")
+            contentType = MediaType.APPLICATION_JSON
+            content = body
+        }.andExpect {
+            status { isAccepted() }
+            jsonPath("$.paymentMethod") { value("CREDIT_CARD") }
+            jsonPath("$.status") { value("SUCCEEDED") }
+            jsonPath("$.recordedBy") { value("alice.johnson@email.com") }
+        }.andReturn().response.contentAsString
 
     private fun login(email: String): String {
         val response = mockMvc.post("/api/auth/login") {

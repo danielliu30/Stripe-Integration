@@ -68,7 +68,10 @@ class LedgerApi(
 
     /**
      * Starts a saved-card payment for the authenticated tenant.
-     * The request selects only the card; ownership and amount are derived on the server.
+     *
+     * The request selects only the card; ownership and amount are derived on the server. `202`
+     * acknowledges durable payment ownership, not final success: an uncertain Stripe response returns
+     * the persisted `INITIATED` payment while its recovery proceeds asynchronously.
      */
     @PostMapping("/api/rent-charges/{id}/pay")
     @ResponseStatus(HttpStatus.ACCEPTED)
