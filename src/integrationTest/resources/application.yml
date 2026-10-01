@@ -36,6 +36,10 @@ aws:
 
 payment-recovery:
   initial-delay-seconds: 1
+  dispatch-interval-ms: 500
+  dispatch-batch-size: 20
+  stale-claim-seconds: 5
+  publication-retry-delay-seconds: 1
 
 worker:
   enabled: true
