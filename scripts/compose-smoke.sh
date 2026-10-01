@@ -110,6 +110,13 @@ java -jar "$JAR_PATH" --server.port=8081 --worker.enabled=true >"$LOG_DIR/worker
 WORKER_PID=$!
 wait_for_http "$API_URL/api/checkout/return"
 
+INVALID_LOGIN_STATUS=$(curl --silent --output "$LOG_DIR/invalid-login.json" --write-out '%{http_code}' \
+  -X POST "$API_URL/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice.johnson@email.com","password":"wrong"}')
+[[ "$INVALID_LOGIN_STATUS" == "401" ]] || fail "wrong password returned HTTP $INVALID_LOGIN_STATUS"
+[[ $(json_field message <"$LOG_DIR/invalid-login.json") == "Invalid credentials" ]] ||
+  fail "wrong password returned unexpected error message"
 LOGIN=$(curl --silent --fail -X POST "$API_URL/api/auth/login" \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice.johnson@email.com","password":"password"}')
