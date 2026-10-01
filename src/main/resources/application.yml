@@ -34,6 +34,9 @@ aws:
     queue-url: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/takehome-jobs
     endpoint: http://localhost:4566
 
+payment-recovery:
+  initial-delay-seconds: 30
+
 worker:
   enabled: false
   poll-interval-ms: 1000

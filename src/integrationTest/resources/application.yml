@@ -34,6 +34,9 @@ aws:
     queue-url: http://localhost:9324/000000000000/test-jobs
     endpoint: http://localhost:9324
 
+payment-recovery:
+  initial-delay-seconds: 1
+
 worker:
   enabled: true
   poll-interval-ms: 500

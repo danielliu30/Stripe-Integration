@@ -2,10 +2,12 @@ package com.ender.takehome
 
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
+import com.ender.takehome.ledger.PaymentRecoveryDataAccess
 import com.ender.takehome.worker.RetryCardPaymentJob
 import com.ender.takehome.worker.RetryCardPaymentParams
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
+import com.ender.takehome.model.PaymentRecoveryStatus
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.stripe.StripePaymentService
@@ -34,6 +36,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import javax.crypto.Mac
@@ -58,6 +61,9 @@ class RealStripeCardSetupIntegrationTest {
 
     @Autowired
     private lateinit var ledgerDataAccess: LedgerDataAccess
+
+    @Autowired
+    private lateinit var recoveryDataAccess: PaymentRecoveryDataAccess
 
     @Autowired
     private lateinit var retryCardPaymentJob: RetryCardPaymentJob
@@ -152,6 +158,7 @@ class RealStripeCardSetupIntegrationTest {
                     recordedBy = "bob.smith@email.com",
                 )
             )
+            recoveryDataAccess.create(initiated.id, Instant.now())
             val original = stripePaymentService.chargeCard(
                 customerId,
                 paymentMethod.id,
@@ -169,6 +176,7 @@ class RealStripeCardSetupIntegrationTest {
             assertEquals(original.paymentIntentId, recovered.stripePaymentIntentId)
             assertEquals(PaymentStatus.SUCCEEDED, recovered.status)
             assertEquals("PAID", ledgerDataAccess.findChargeById(recoveryCharge.id)?.status?.name)
+            assertEquals(PaymentRecoveryStatus.COMPLETED, recoveryDataAccess.findByPaymentId(initiated.id)?.status)
 
             val charge = ledgerDataAccess.saveCharge(
                 RentCharge(leaseId = 2L, amount = BigDecimal("1.00"), dueDate = LocalDate.of(2099, 1, 1))
