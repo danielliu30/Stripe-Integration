@@ -126,16 +126,7 @@ class LedgerModule(
         }
 
         val stripeResult = try {
-            stripePaymentService.chargeCard(
-                customerId = prepared.customerId,
-                paymentMethodId = prepared.card.stripePaymentMethodId,
-                amount = prepared.payment.amount,
-                idempotencyKey = idempotencyKey,
-                metadata = mapOf(
-                    "paymentId" to prepared.payment.id.toString(),
-                    "rentChargeId" to chargeId.toString(),
-                ),
-            )
+            chargePreparedCard(prepared)
         } catch (exception: CardException) {
             val failed = transactionHelper.executeWithRetry {
                 dataAccess.updatePaymentStatus(
@@ -156,6 +147,44 @@ class LedgerModule(
         val settled = transactionHelper.executeWithRetry {
             settlePayment(
                 prepared.payment.id,
+                stripeResult.status,
+                stripeResult.failureReason,
+                stripeResult.paymentIntentId,
+            )
+        }
+        return PaymentResult(settled, prepared.card)
+    }
+
+    /**
+     * Re-executes Stripe for an existing `INITIATED` payment without creating another payment.
+     *
+     * A short transaction locks and reloads the payment before reconstructing its persisted amount,
+     * card, tenant Customer, idempotency key, and reconciliation metadata. Non-`INITIATED` or missing
+     * payments are no-ops so duplicate/stale queue messages are safe. The Stripe call runs after the
+     * lock is released; concurrent workers remain safe because they send identical parameters with
+     * the same Stripe idempotency key. Definite card declines settle `FAILED`, while uncertain Stripe
+     * failures propagate so the queue retains and backs off the message.
+     */
+    fun executeInitiatedPayment(paymentId: Long): PaymentResult? {
+        val prepared = transactionHelper.executeWithRetry { prepareInitiatedPayment(paymentId) } ?: return null
+        val stripeResult = try {
+            chargePreparedCard(prepared)
+        } catch (exception: CardException) {
+            val failed = transactionHelper.executeWithRetry {
+                settleInitiatedPayment(
+                    paymentId,
+                    PaymentStatus.FAILED,
+                    exception.stripeError?.message ?: exception.message ?: "Card declined",
+                    exception.stripeError?.paymentIntent?.id,
+                )
+            }
+            return PaymentResult(failed, prepared.card)
+        } catch (exception: StripeException) {
+            throw UpstreamException("Payment processor unavailable", exception)
+        }
+        val settled = transactionHelper.executeWithRetry {
+            settleInitiatedPayment(
+                paymentId,
                 stripeResult.status,
                 stripeResult.failureReason,
                 stripeResult.paymentIntentId,
@@ -214,6 +243,45 @@ class LedgerModule(
     }
 
     /**
+     * Builds the one canonical Stripe request from persisted payment context. Initial execution and
+     * recovery therefore use identical amount, PaymentMethod, metadata, and idempotency key.
+     */
+    private fun chargePreparedCard(prepared: PreparedPayment) = stripePaymentService.chargeCard(
+        customerId = prepared.customerId,
+        paymentMethodId = prepared.card.stripePaymentMethodId,
+        amount = prepared.payment.amount,
+        idempotencyKey = requireNotNull(prepared.payment.idempotencyKey) {
+            "Payment ${prepared.payment.id} has no idempotency key"
+        },
+        metadata = mapOf(
+            "paymentId" to prepared.payment.id.toString(),
+            "rentChargeId" to prepared.payment.rentChargeId.toString(),
+        ),
+    )
+
+    /** Reconstructs immutable Stripe request context while holding the payment row lock. */
+    private fun prepareInitiatedPayment(paymentId: Long): PreparedPayment? {
+        val payment = dataAccess.findPaymentByIdForUpdate(paymentId) ?: return null
+        if (payment.status != PaymentStatus.INITIATED) return null
+        if (payment.paymentMethod != PaymentMethod.CREDIT_CARD) {
+            throw IllegalStateException("Payment $paymentId is not a card payment")
+        }
+        val cardId = payment.cardId ?: throw IllegalStateException("Payment $paymentId has no card")
+        val card = cardDataAccess.findById(cardId)
+            ?: throw IllegalStateException("Card $cardId missing for payment $paymentId")
+        val charge = dataAccess.findChargeById(payment.rentChargeId)
+            ?: throw IllegalStateException("Rent charge ${payment.rentChargeId} missing for payment $paymentId")
+        val tenantId = leaseDataAccess.findById(charge.leaseId)?.tenantId
+            ?: throw IllegalStateException("Lease ${charge.leaseId} missing for payment $paymentId")
+        if (card.tenantId != tenantId) {
+            throw IllegalStateException("Card $cardId does not belong to payment tenant")
+        }
+        val customerId = tenantDataAccess.findById(tenantId)?.stripeCustomerId
+            ?: throw IllegalStateException("Tenant $tenantId has no Stripe customer")
+        return PreparedPayment(payment, card, customerId)
+    }
+
+    /**
      * Reconciles Stripe's asynchronous view of a PaymentIntent with its local payment.
      *
      * The payment row is locked before validating [allowedStripeTransitions], serializing duplicate
@@ -232,12 +300,28 @@ class LedgerModule(
         settlePayment(payment.id, status, failureReason, paymentIntentId)
     }
 
+    /**
+     * Applies a recovery result only while the payment still needs recovery. A webhook or competing
+     * worker that committed first wins; the stale executor returns that authoritative state.
+     */
+    private fun settleInitiatedPayment(
+        paymentId: Long,
+        status: PaymentStatus,
+        failureReason: String?,
+        paymentIntentId: String?,
+    ): Payment {
+        val payment = requireNotNull(dataAccess.findPaymentByIdForUpdate(paymentId))
+        return if (payment.status == PaymentStatus.INITIATED) {
+            settlePayment(paymentId, status, failureReason, paymentIntentId)
+        } else payment
+    }
+
     /** Applies Stripe's synchronous result and marks the rent charge paid only on success. */
     private fun settlePayment(
         paymentId: Long,
         status: PaymentStatus,
         failureReason: String?,
-        paymentIntentId: String,
+        paymentIntentId: String?,
     ): Payment {
         val payment = dataAccess.updatePaymentStatus(paymentId, status, failureReason, paymentIntentId)
         when (status) {

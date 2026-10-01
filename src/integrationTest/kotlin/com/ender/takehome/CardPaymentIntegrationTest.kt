@@ -2,6 +2,7 @@ package com.ender.takehome
 
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
+import com.ender.takehome.ledger.LedgerModule
 import com.ender.takehome.model.Card
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
@@ -60,6 +61,9 @@ class CardPaymentIntegrationTest {
     private lateinit var ledgerDataAccess: LedgerDataAccess
 
     @Autowired
+    private lateinit var ledgerModule: LedgerModule
+
+    @Autowired
     private lateinit var stripeService: FakeStripeService
 
     @Test
@@ -92,6 +96,43 @@ class CardPaymentIntegrationTest {
         assertEquals(listOf("e2e-request-key"), stripeService.idempotencyKeys)
         assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
         assertEquals(1, ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).size)
+    }
+
+    @Test
+    fun `resumes persisted initiated payment without inserting another payment`() {
+        val tenant = requireNotNull(tenantDataAccess.findById(1L))
+        tenantDataAccess.save(tenant.copy(stripeCustomerId = "cus_alice_recovery"))
+        val card = cardDataAccess.save(
+            Card(
+                tenantId = 1L,
+                stripePaymentMethodId = "pm_recovery",
+                brand = "visa",
+                last4 = "4242",
+                expMonth = 12,
+                expYear = 2030,
+            )
+        )
+        val charge = ledgerDataAccess.saveCharge(
+            RentCharge(leaseId = 1L, amount = BigDecimal("25.00"), dueDate = LocalDate.of(2099, 2, 1))
+        )
+        val initiated = ledgerDataAccess.savePayment(
+            Payment(
+                rentChargeId = charge.id,
+                amount = charge.amount,
+                paymentMethod = PaymentMethod.CREDIT_CARD,
+                status = PaymentStatus.INITIATED,
+                cardId = card.id,
+                idempotencyKey = "persisted-recovery-key",
+                recordedBy = tenant.email,
+            )
+        )
+
+        val result = requireNotNull(ledgerModule.executeInitiatedPayment(initiated.id))
+
+        assertEquals(PaymentStatus.SUCCEEDED, result.payment.status)
+        assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
+        assertEquals(1, ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).size)
+        assertEquals("persisted-recovery-key", stripeService.idempotencyKeys.last())
     }
 
     @Test
@@ -222,7 +263,7 @@ class CardPaymentIntegrationTest {
         ): StripeChargeResult {
             chargeCalls++
             idempotencyKeys += idempotencyKey
-            return StripeChargeResult("pi_test", PaymentStatus.SUCCEEDED, null)
+            return StripeChargeResult("pi_$idempotencyKey", PaymentStatus.SUCCEEDED, null)
         }
     }
 }

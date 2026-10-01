@@ -7,6 +7,7 @@ import com.ender.takehome.config.UserPrincipal
 import com.ender.takehome.dto.request.RecordPaymentRequest
 import com.ender.takehome.exception.ConflictException
 import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.exception.UpstreamException
 import com.ender.takehome.leasing.LeaseDataAccess
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.Card
@@ -17,6 +18,8 @@ import com.ender.takehome.model.UserRole
 import com.ender.takehome.stripe.StripeChargeResult
 import com.ender.takehome.stripe.StripePaymentService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.exception.ApiConnectionException
+import com.stripe.exception.CardException
 import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -215,6 +218,7 @@ class LedgerModuleTest {
             paymentMethod = PaymentMethod.CREDIT_CARD,
             status = PaymentStatus.INITIATED,
             cardId = card.id,
+            idempotencyKey = "test-key",
             recordedBy = tenant.email,
         )
         every { dataAccess.savePayment(any()) } returns initiated
@@ -234,6 +238,82 @@ class LedgerModuleTest {
             stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "test-key", any())
         }
         verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+    }
+
+    @Test
+    fun `executeInitiatedPayment no-ops when payment is missing`() {
+        every { dataAccess.findPaymentByIdForUpdate(99L) } returns null
+
+        assertNull(module.executeInitiatedPayment(99L))
+
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `executeInitiatedPayment no-ops after another path settles payment`() {
+        val succeeded = recoverablePayment().copy(status = PaymentStatus.SUCCEEDED)
+        every { dataAccess.findPaymentByIdForUpdate(succeeded.id) } returns succeeded
+
+        val result = module.executeInitiatedPayment(succeeded.id)
+
+        assertNull(result)
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `executeInitiatedPayment reuses persisted Stripe request and settles existing payment`() {
+        val initiated = recoverablePayment()
+        stubRecoveryContext(initiated)
+        every {
+            stripeService.chargeCard("cus_test", "pm_test", initiated.amount, "recovery-key", any())
+        } returns StripeChargeResult("pi_test", PaymentStatus.SUCCEEDED, null)
+        every {
+            dataAccess.updatePaymentStatus(initiated.id, PaymentStatus.SUCCEEDED, null, "pi_test")
+        } returns initiated.copy(status = PaymentStatus.SUCCEEDED, stripePaymentIntentId = "pi_test")
+        every { dataAccess.saveCharge(any()) } answers { firstArg() }
+
+        val result = requireNotNull(module.executeInitiatedPayment(initiated.id))
+
+        assertEquals(PaymentStatus.SUCCEEDED, result.payment.status)
+        verify(exactly = 0) { dataAccess.savePayment(any()) }
+        verify {
+            stripeService.chargeCard(
+                "cus_test",
+                "pm_test",
+                initiated.amount,
+                "recovery-key",
+                mapOf("paymentId" to initiated.id.toString(), "rentChargeId" to rentCharge.id.toString()),
+            )
+        }
+    }
+
+    @Test
+    fun `executeInitiatedPayment records definite card decline`() {
+        val initiated = recoverablePayment()
+        stubRecoveryContext(initiated)
+        every {
+            stripeService.chargeCard(any(), any(), any(), any(), any())
+        } throws CardException("Card declined", null, null, null, null, null, 402, null)
+        every {
+            dataAccess.updatePaymentStatus(initiated.id, PaymentStatus.FAILED, "Card declined", null)
+        } returns initiated.copy(status = PaymentStatus.FAILED, failureReason = "Card declined")
+
+        val result = requireNotNull(module.executeInitiatedPayment(initiated.id))
+
+        assertEquals(PaymentStatus.FAILED, result.payment.status)
+    }
+
+    @Test
+    fun `executeInitiatedPayment propagates uncertain failure without changing payment`() {
+        val initiated = recoverablePayment()
+        stubRecoveryContext(initiated)
+        every {
+            stripeService.chargeCard(any(), any(), any(), any(), any())
+        } throws ApiConnectionException("Connection closed before Stripe responded")
+
+        assertThrows<UpstreamException> { module.executeInitiatedPayment(initiated.id) }
+
+        verify(exactly = 0) { dataAccess.updatePaymentStatus(any(), any(), any(), any()) }
     }
 
     @Test
@@ -318,6 +398,25 @@ class LedgerModuleTest {
         assertEquals(PaymentMethod.CHECK, result.paymentMethod)
         assertEquals("Check #1234", result.notes)
         verify(exactly = 1) { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+    }
+
+    private fun recoverablePayment() = Payment(
+        id = 10L,
+        rentChargeId = rentCharge.id,
+        amount = rentCharge.amount,
+        paymentMethod = PaymentMethod.CREDIT_CARD,
+        status = PaymentStatus.INITIATED,
+        cardId = card.id,
+        idempotencyKey = "recovery-key",
+        recordedBy = tenant.email,
+    )
+
+    private fun stubRecoveryContext(payment: Payment) {
+        every { dataAccess.findPaymentByIdForUpdate(payment.id) } returns payment
+        every { cardDataAccess.findById(card.id) } returns card
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { tenantDataAccess.findById(tenant.id) } returns tenant
     }
 
     private fun stubPaymentPreparation() {
