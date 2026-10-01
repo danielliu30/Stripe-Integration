@@ -3,6 +3,7 @@ package com.ender.takehome.stripe
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.Tenant
 import com.stripe.StripeClient
+import com.stripe.model.PaymentIntent
 import com.stripe.model.SetupIntent
 import com.stripe.net.RequestOptions
 import com.stripe.net.Webhook
@@ -20,10 +21,25 @@ data class StripeCardDetails(
     val expYear: Int,
 )
 
+/**
+ * Application-owned representation of the signed Stripe events this service consumes.
+ * Stripe SDK objects remain inside [StripeServiceImpl], so webhook routing and business logic
+ * depend only on the fields required to advance card setup or payment state.
+ */
+sealed interface StripeWebhookEvent
+
 data class SetupIntentSucceeded(
     val customerId: String,
     val paymentMethodId: String,
-)
+) : StripeWebhookEvent
+
+data class StripePaymentUpdated(
+    val paymentIntentId: String,
+    val status: PaymentStatus,
+    val failureReason: String? = null,
+) : StripeWebhookEvent
+
+data object UnhandledStripeWebhookEvent : StripeWebhookEvent
 
 data class StripeChargeResult(
     val paymentIntentId: String,
@@ -42,8 +58,15 @@ interface StripeService {
     /** Creates a hosted setup session and returns the URL where the client sends the tenant. */
     fun createSetupCheckoutSession(customerId: String): String
 
-    /** Verifies a Stripe webhook and returns the supported setup event, if present. */
-    fun parseSetupIntentSucceeded(payload: String, signature: String): SetupIntentSucceeded?
+    /**
+     * Verifies [signature] before translating a supported event from [payload].
+     *
+     * Signature verification and deserialization happen once at this boundary. Known setup and
+     * PaymentIntent events are reduced to application-owned values; valid but unsupported or
+     * incomplete events return [UnhandledStripeWebhookEvent] so Stripe receives a successful
+     * acknowledgement instead of retrying an event this application cannot act on.
+     */
+    fun parseWebhookEvent(payload: String, signature: String): StripeWebhookEvent
 
     /** Retrieves the non-sensitive display fields for a Stripe card PaymentMethod. */
     fun getCardDetails(paymentMethodId: String): StripeCardDetails
@@ -104,14 +127,34 @@ class StripeServiceImpl(
                 .build()
         ).url
 
-    override fun parseSetupIntentSucceeded(payload: String, signature: String): SetupIntentSucceeded? {
+    override fun parseWebhookEvent(payload: String, signature: String): StripeWebhookEvent {
         val event = Webhook.constructEvent(payload, signature, webhookSecret)
-        if (event.type != "setup_intent.succeeded") return null
-        val setupIntent = event.dataObjectDeserializer.`object`.orElse(null) as? SetupIntent ?: return null
-        val customerId = setupIntent.customer ?: return null
-        val paymentMethodId = setupIntent.paymentMethod ?: return null
-        return SetupIntentSucceeded(customerId, paymentMethodId)
+        val stripeObject = event.dataObjectDeserializer.`object`.orElse(null)
+        return when (event.type) {
+            "setup_intent.succeeded" -> {
+                val setupIntent = stripeObject as? SetupIntent ?: return UnhandledStripeWebhookEvent
+                val customerId = setupIntent.customer ?: return UnhandledStripeWebhookEvent
+                val paymentMethodId = setupIntent.paymentMethod ?: return UnhandledStripeWebhookEvent
+                SetupIntentSucceeded(customerId, paymentMethodId)
+            }
+            "payment_intent.succeeded" -> (stripeObject as? PaymentIntent)?.toWebhookEvent(PaymentStatus.SUCCEEDED)
+                ?: UnhandledStripeWebhookEvent
+            "payment_intent.processing" -> (stripeObject as? PaymentIntent)?.toWebhookEvent(PaymentStatus.PROCESSING)
+                ?: UnhandledStripeWebhookEvent
+            "payment_intent.payment_failed" -> (stripeObject as? PaymentIntent)?.toWebhookEvent(
+                PaymentStatus.FAILED,
+                (stripeObject as? PaymentIntent)?.lastPaymentError?.message ?: "Payment failed",
+            ) ?: UnhandledStripeWebhookEvent
+            "payment_intent.canceled" -> (stripeObject as? PaymentIntent)?.toWebhookEvent(
+                PaymentStatus.FAILED,
+                "Payment canceled",
+            ) ?: UnhandledStripeWebhookEvent
+            else -> UnhandledStripeWebhookEvent
+        }
     }
+
+    private fun PaymentIntent.toWebhookEvent(status: PaymentStatus, failureReason: String? = null) =
+        StripePaymentUpdated(id, status, failureReason)
 
     override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
         val card = client.v1().paymentMethods().retrieve(paymentMethodId).card

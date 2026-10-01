@@ -10,6 +10,7 @@ import com.ender.takehome.model.RentCharge
 import com.ender.takehome.stripe.StripeChargeResult
 import com.ender.takehome.stripe.StripePaymentService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.Stripe
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Tag
@@ -30,6 +31,8 @@ import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 @Tag("integration")
 @SpringBootTest(properties = [
@@ -92,6 +95,41 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
+    fun `signed Stripe webhook settles a processing payment`() {
+        val paymentIntentId = "pi_${UUID.randomUUID()}"
+        val payment = ledgerDataAccess.savePayment(
+            Payment(
+                rentChargeId = 1L,
+                amount = BigDecimal("2000.00"),
+                paymentMethod = PaymentMethod.CREDIT_CARD,
+                status = PaymentStatus.PROCESSING,
+                stripePaymentIntentId = paymentIntentId,
+                recordedBy = "alice.johnson@email.com",
+            )
+        )
+        val payload = """
+            {
+              "id": "evt_${UUID.randomUUID()}",
+              "object": "event",
+              "api_version": "${Stripe.API_VERSION}",
+              "type": "payment_intent.succeeded",
+              "data": { "object": { "id": "$paymentIntentId", "object": "payment_intent", "status": "succeeded" } }
+            }
+        """.trimIndent()
+
+        mockMvc.post("/api/webhooks/stripe") {
+            contentType = MediaType.APPLICATION_JSON
+            content = payload
+            header("Stripe-Signature", signature(payload))
+        }.andExpect { status { isOk() } }
+
+        val settled = ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 10)
+            .single { it.id == payment.id }
+        assertEquals(PaymentStatus.SUCCEEDED, settled.status)
+        assertEquals("PAID", ledgerDataAccess.findChargeById(1L)?.status?.name)
+    }
+
+    @Test
     fun `database rejects duplicate payment idempotency key`() {
         val key = "database-${UUID.randomUUID()}"
         val payment = Payment(
@@ -127,6 +165,14 @@ class CardPaymentIntegrationTest {
             content = """{"email":"$email","password":"password"}"""
         }.andReturn()
         return objectMapper.readTree(response.response.contentAsString).get("token").asText()
+    }
+
+    private fun signature(payload: String): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec("integration-webhook-placeholder".toByteArray(), "HmacSHA256"))
+        val digest = mac.doFinal("$timestamp.$payload".toByteArray()).joinToString("") { "%02x".format(it) }
+        return "t=$timestamp,v1=$digest"
     }
 
     @TestConfiguration(proxyBeanMethods = false)

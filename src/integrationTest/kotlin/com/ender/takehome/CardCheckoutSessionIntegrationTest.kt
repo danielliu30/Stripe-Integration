@@ -2,6 +2,7 @@ package com.ender.takehome
 
 import com.ender.takehome.model.Tenant
 import com.ender.takehome.stripe.SetupIntentSucceeded
+import com.ender.takehome.stripe.UnhandledStripeWebhookEvent
 import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
@@ -163,7 +164,7 @@ class CardCheckoutSessionIntegrationTest {
             return "https://checkout.stripe.test/session"
         }
 
-        override fun parseSetupIntentSucceeded(payload: String, signature: String): SetupIntentSucceeded? = setupEvent
+        override fun parseWebhookEvent(payload: String, signature: String) = setupEvent ?: UnhandledStripeWebhookEvent
 
         override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
             cardDetailsCalls++

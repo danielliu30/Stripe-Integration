@@ -1,5 +1,6 @@
 package com.ender.takehome.stripe
 
+import com.ender.takehome.model.PaymentStatus
 import com.stripe.Stripe
 import com.stripe.exception.SignatureVerificationException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -23,15 +24,27 @@ class StripeServiceTest {
     fun `verifies and parses setup intent succeeded event`() {
         val payload = payload()
 
-        val event = service.parseSetupIntentSucceeded(payload, signature(payload))
+        val event = service.parseWebhookEvent(payload, signature(payload))
 
         assertEquals(SetupIntentSucceeded("cus_test", "pm_test"), event)
     }
 
     @Test
+    fun `verifies and parses failed payment intent event`() {
+        val payload = paymentPayload()
+
+        val event = service.parseWebhookEvent(payload, signature(payload))
+
+        assertEquals(
+            StripePaymentUpdated("pi_test", PaymentStatus.FAILED, "Card declined"),
+            event,
+        )
+    }
+
+    @Test
     fun `rejects invalid webhook signature`() {
         assertThrows<SignatureVerificationException> {
-            service.parseSetupIntentSucceeded(payload(), "t=1,v1=invalid")
+            service.parseWebhookEvent(payload(), "t=1,v1=invalid")
         }
     }
 
@@ -48,6 +61,23 @@ class StripeServiceTest {
               "customer": "cus_test",
               "payment_method": "pm_test",
               "status": "succeeded"
+            }
+          }
+        }
+    """.trimIndent()
+
+    private fun paymentPayload() = """
+        {
+          "id": "evt_payment_test",
+          "object": "event",
+          "api_version": "${Stripe.API_VERSION}",
+          "type": "payment_intent.payment_failed",
+          "data": {
+            "object": {
+              "id": "pi_test",
+              "object": "payment_intent",
+              "status": "requires_payment_method",
+              "last_payment_error": { "message": "Card declined" }
             }
           }
         }

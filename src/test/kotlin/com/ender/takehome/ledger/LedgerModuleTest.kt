@@ -222,6 +222,46 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `payment webhook advances processing payment and marks charge paid`() {
+        val processing = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.PROCESSING,
+            stripePaymentIntentId = "pi_test",
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.findPaymentByStripePaymentIntentIdForUpdate("pi_test") } returns processing
+        every { dataAccess.updatePaymentStatus(10L, PaymentStatus.SUCCEEDED, null, "pi_test") } returns
+            processing.copy(status = PaymentStatus.SUCCEEDED)
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { dataAccess.saveCharge(any()) } answers { firstArg() }
+
+        module.applyStripePaymentEvent("pi_test", PaymentStatus.SUCCEEDED)
+
+        verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+    }
+
+    @Test
+    fun `payment webhook ignores events that regress a succeeded payment`() {
+        val succeeded = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.SUCCEEDED,
+            stripePaymentIntentId = "pi_test",
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.findPaymentByStripePaymentIntentIdForUpdate("pi_test") } returns succeeded
+
+        module.applyStripePaymentEvent("pi_test", PaymentStatus.FAILED, "Late failure")
+
+        verify(exactly = 0) { dataAccess.updatePaymentStatus(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `recordPayment creates payment and marks charge as paid`() {
         val request = RecordPaymentRequest(
             rentChargeId = rentCharge.id,
