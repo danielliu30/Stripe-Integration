@@ -195,6 +195,21 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `payCharge returns initiated replay without another Stripe call`() {
+        val existing = recoverablePayment().copy(idempotencyKey = "pending-key")
+        every { dataAccess.findPaymentByIdempotencyKey("pending-key") } returns existing
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { cardDataAccess.findById(card.id) } returns card
+
+        val result = module.payCharge(principal, rentCharge.id, card.id, "pending-key")
+
+        assertEquals(existing, result.payment)
+        verify(exactly = 0) { dataAccess.savePayment(any()) }
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `payCharge reloads winner after duplicate idempotency insert`() {
         val existing = Payment(
             id = 10L,
@@ -253,7 +268,7 @@ class LedgerModuleTest {
     }
 
     @Test
-    fun `payCharge leaves payment and recovery pending when Stripe outcome is uncertain`() {
+    fun `payCharge accepts initiated payment when Stripe outcome is uncertain`() {
         stubPaymentPreparation()
         val initiated = recoverablePayment().copy(idempotencyKey = "test-key")
         every { dataAccess.savePayment(any()) } returns initiated
@@ -261,10 +276,9 @@ class LedgerModuleTest {
             stripeService.chargeCard("cus_test", "pm_test", initiated.amount, "test-key", any())
         } throws ApiConnectionException("Connection closed before Stripe responded")
 
-        assertThrows<UpstreamException> {
-            module.payCharge(principal, rentCharge.id, card.id, "test-key")
-        }
+        val result = module.payCharge(principal, rentCharge.id, card.id, "test-key")
 
+        assertEquals(initiated, result.payment)
         verify(exactly = 1) { recoveryDataAccess.create(initiated.id, any()) }
         verify(exactly = 0) { recoveryDataAccess.markCompleted(any(), any()) }
         verify(exactly = 0) { dataAccess.updatePaymentStatus(any(), any(), any(), any()) }
