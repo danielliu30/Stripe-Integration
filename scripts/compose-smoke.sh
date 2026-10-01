@@ -124,6 +124,15 @@ CHECKOUT_STATUS=$(curl --silent --output "$LOG_DIR/checkout-error.json" --write-
 [[ "$CHECKOUT_STATUS" == "502" ]] || fail "Stripe checkout failure returned HTTP $CHECKOUT_STATUS"
 [[ $(mysql_value "SELECT COUNT(*) FROM tenants WHERE id=1 AND stripe_customer_id IS NOT NULL;") == "0" ]] ||
   fail "failed Stripe customer creation changed tenant state"
+MISSING_HEADER_STATUS=$(curl --silent --output "$LOG_DIR/missing-header.json" --write-out '%{http_code}' \
+  -X POST "$API_URL/api/rent-charges/1/pay" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"cardId":1}')
+[[ "$MISSING_HEADER_STATUS" == "400" ]] ||
+  fail "missing Idempotency-Key returned HTTP $MISSING_HEADER_STATUS"
+[[ $(json_field message <"$LOG_DIR/missing-header.json") == "Missing required header: Idempotency-Key" ]] ||
+  fail "missing Idempotency-Key returned unexpected error message"
 
 docker compose exec -T mysql mysql -uroot -ppassword takehome -e \
   "UPDATE tenants SET stripe_customer_id='cus_compose_smoke' WHERE id=1;
