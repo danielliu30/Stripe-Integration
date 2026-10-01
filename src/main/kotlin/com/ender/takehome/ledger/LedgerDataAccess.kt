@@ -89,6 +89,14 @@ class LedgerDataAccess(private val dsl: DSLContext) {
             .fetchOne()
             ?.toModel()
 
+    /** Locks a payment while a webhook validates and applies its next lifecycle state. */
+    fun findPaymentByStripePaymentIntentIdForUpdate(paymentIntentId: String): Payment? =
+        dsl.selectFrom(PAYMENTS)
+            .where(PAYMENTS.STRIPE_PAYMENT_INTENT_ID.eq(paymentIntentId))
+            .forUpdate()
+            .fetchOne()
+            ?.toModel()
+
     fun findInFlightPaymentByChargeId(rentChargeId: Long): Payment? =
         dsl.selectFrom(PAYMENTS)
             .where(PAYMENTS.RENT_CHARGE_ID.eq(rentChargeId))

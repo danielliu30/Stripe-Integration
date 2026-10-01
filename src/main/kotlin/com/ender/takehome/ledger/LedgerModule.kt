@@ -213,6 +213,25 @@ class LedgerModule(
         return PreparedPayment(payment, card, customerId)
     }
 
+    /**
+     * Reconciles Stripe's asynchronous view of a PaymentIntent with its local payment.
+     *
+     * The payment row is locked before validating [allowedStripeTransitions], serializing duplicate
+     * or concurrently delivered events across application instances. Repeated states and stale
+     * events are no-ops, so a late failure cannot regress a succeeded payment. A successful event
+     * also settles the rent charge in this transaction through [settlePayment].
+     *
+     * Unknown PaymentIntents are acknowledged without mutation because a Stripe account may contain
+     * objects created by another environment. Refund events are intentionally excluded until the
+     * refund workflow can update both the payment and rent-charge balance together.
+     */
+    @Transactional
+    fun applyStripePaymentEvent(paymentIntentId: String, status: PaymentStatus, failureReason: String? = null) {
+        val payment = dataAccess.findPaymentByStripePaymentIntentIdForUpdate(paymentIntentId) ?: return
+        if (status == payment.status || status !in allowedStripeTransitions.getValue(payment.status)) return
+        settlePayment(payment.id, status, failureReason, paymentIntentId)
+    }
+
     /** Applies Stripe's synchronous result and marks the rent charge paid only on success. */
     private fun settlePayment(
         paymentId: Long,
@@ -245,6 +264,31 @@ class LedgerModule(
         val card: Card,
         val customerId: String,
     )
+
+    private companion object {
+        /**
+         * Forward-only Stripe transitions for one local payment attempt. `FAILED` is terminal for
+         * this attempt; a later client retry creates a new local payment and PaymentIntent.
+         * `REFUNDED` is reserved for the separate refund workflow.
+         */
+        val allowedStripeTransitions = mapOf(
+            PaymentStatus.INITIATED to setOf(
+                PaymentStatus.REQUIRES_ACTION,
+                PaymentStatus.PROCESSING,
+                PaymentStatus.SUCCEEDED,
+                PaymentStatus.FAILED,
+            ),
+            PaymentStatus.REQUIRES_ACTION to setOf(
+                PaymentStatus.PROCESSING,
+                PaymentStatus.SUCCEEDED,
+                PaymentStatus.FAILED,
+            ),
+            PaymentStatus.PROCESSING to setOf(PaymentStatus.SUCCEEDED, PaymentStatus.FAILED),
+            PaymentStatus.SUCCEEDED to emptySet(),
+            PaymentStatus.FAILED to emptySet(),
+            PaymentStatus.REFUNDED to emptySet(),
+        )
+    }
 
     @Transactional
     fun recordPayment(request: RecordPaymentRequest): Payment {
