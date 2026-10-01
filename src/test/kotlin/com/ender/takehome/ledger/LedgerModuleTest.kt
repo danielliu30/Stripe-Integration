@@ -144,6 +144,20 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `payCharge rejects a deactivated card`() {
+        every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns rentCharge
+        every { leaseDataAccess.findById(lease.id) } returns lease
+        every { dataAccess.findInFlightPaymentByChargeId(rentCharge.id) } returns null
+        every { cardDataAccess.findActiveById(card.id) } returns null
+
+        assertThrows<ResourceNotFoundException> {
+            module.payCharge(principal, rentCharge.id, card.id, "test-key")
+        }
+
+        verify(exactly = 0) { stripeService.chargeCard(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `payCharge returns existing payment before inserting or charging`() {
         val existing = Payment(
             id = 10L,
@@ -183,6 +197,7 @@ class LedgerModuleTest {
         stubPaymentPreparation()
         every { dataAccess.savePayment(any()) } throws IntegrityConstraintViolationException("duplicate")
         every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge
+        every { cardDataAccess.findById(card.id) } returns card
 
         val result = module.payCharge(principal, rentCharge.id, card.id, "race-key")
 
@@ -309,7 +324,7 @@ class LedgerModuleTest {
         every { dataAccess.findChargeByIdForUpdate(rentCharge.id) } returns rentCharge
         every { leaseDataAccess.findById(lease.id) } returns lease
         every { dataAccess.findInFlightPaymentByChargeId(rentCharge.id) } returns null
-        every { cardDataAccess.findById(card.id) } returns card
+        every { cardDataAccess.findActiveById(card.id) } returns card
         every { tenantDataAccess.findById(tenant.id) } returns tenant
         every { dataAccess.sumSucceededPayments(rentCharge.id) } returns BigDecimal.ZERO
     }

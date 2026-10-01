@@ -33,14 +33,18 @@ class CardModule(
         return stripeService.createSetupCheckoutSession(customerId)
     }
 
-    /** Detaches and removes a saved card owned by the authenticated tenant. */
+    /**
+     * Detaches a tenant-owned card and hides it from future use without deleting payment history.
+     * Repeating a completed deletion is a no-op, avoiding a second Stripe detach call.
+     */
     fun delete(tenantId: Long, cardId: Long) {
         val card = dataAccess.findById(cardId)
         if (card == null || card.tenantId != tenantId) {
             throw ResourceNotFoundException("Card not found: $cardId")
         }
+        if (card.deletedAt != null) return
         stripeService.detachPaymentMethod(card.stripePaymentMethodId)
-        dataAccess.delete(card.id)
+        dataAccess.markDeleted(card.id)
     }
 
     /** Persists safe card display data from an authenticated Stripe setup event. */

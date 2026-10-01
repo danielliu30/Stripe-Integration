@@ -187,7 +187,7 @@ class LedgerModule(
         if (dataAccess.findInFlightPaymentByChargeId(chargeId) != null) {
             throw ConflictException("A payment for rent charge $chargeId is already in progress")
         }
-        val card = cardDataAccess.findById(cardId)
+        val card = cardDataAccess.findActiveById(cardId)
         if (card == null || card.tenantId != tenantId) {
             throw ResourceNotFoundException("Card not found: $cardId")
         }
