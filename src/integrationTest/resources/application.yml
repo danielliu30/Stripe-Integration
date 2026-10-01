@@ -39,3 +39,6 @@ worker:
   poll-interval-ms: 500
   max-messages: 10
   visibility-timeout-seconds: 30
+  retry-base-delay-seconds: 1
+  retry-max-delay-seconds: 2
+  retry-jitter-ratio: 0.0
