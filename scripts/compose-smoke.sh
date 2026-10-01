@@ -118,6 +118,12 @@ TOKEN=$(printf '%s' "$LOGIN" | json_field token)
 CARDS=$(curl --silent --fail "$API_URL/api/cards" -H "Authorization: Bearer $TOKEN")
 [[ $(printf '%s' "$CARDS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["content"]))') == "0" ]] ||
   fail "fresh tenant unexpectedly has cards"
+CHECKOUT_STATUS=$(curl --silent --output "$LOG_DIR/checkout-error.json" --write-out '%{http_code}' \
+  -X POST "$API_URL/api/cards/checkout-session" \
+  -H "Authorization: Bearer $TOKEN")
+[[ "$CHECKOUT_STATUS" == "502" ]] || fail "Stripe checkout failure returned HTTP $CHECKOUT_STATUS"
+[[ $(mysql_value "SELECT COUNT(*) FROM tenants WHERE id=1 AND stripe_customer_id IS NOT NULL;") == "0" ]] ||
+  fail "failed Stripe customer creation changed tenant state"
 
 docker compose exec -T mysql mysql -uroot -ppassword takehome -e \
   "UPDATE tenants SET stripe_customer_id='cus_compose_smoke' WHERE id=1;

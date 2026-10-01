@@ -2,10 +2,12 @@ package com.ender.takehome.card
 
 import com.ender.takehome.TestFixtures
 import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.exception.UpstreamException
 import com.ender.takehome.model.Card
 import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.exception.ApiConnectionException
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -49,6 +51,31 @@ class CardModuleTest {
     }
 
     @Test
+    fun `customer failure becomes upstream error without persisting tenant`() {
+        val tenant = TestFixtures.tenant(id = 1L)
+        every { tenantDataAccess.findById(1L) } returns tenant
+        every { stripeService.createCustomer(tenant) } throws ApiConnectionException("Stripe unavailable")
+
+        assertThrows<UpstreamException> { module.createSetupCheckoutSession(1L) }
+
+        verify(exactly = 0) { tenantDataAccess.save(any()) }
+        verify(exactly = 0) { stripeService.createSetupCheckoutSession(any()) }
+    }
+
+    @Test
+    fun `checkout failure becomes upstream error without changing existing customer`() {
+        val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_existing")
+        every { tenantDataAccess.findById(1L) } returns tenant
+        every {
+            stripeService.createSetupCheckoutSession("cus_existing")
+        } throws ApiConnectionException("Stripe unavailable")
+
+        assertThrows<UpstreamException> { module.createSetupCheckoutSession(1L) }
+
+        verify(exactly = 0) { tenantDataAccess.save(any()) }
+    }
+
+    @Test
     fun `detaches and deactivates tenant owned card`() {
         val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
         every { cardDataAccess.findById(1L) } returns card
@@ -59,6 +86,19 @@ class CardModuleTest {
 
         verify { stripeService.detachPaymentMethod("pm_test") }
         verify { cardDataAccess.markDeleted(1L) }
+    }
+
+    @Test
+    fun `detach failure becomes upstream error without deactivating card`() {
+        val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
+        every { cardDataAccess.findById(1L) } returns card
+        every {
+            stripeService.detachPaymentMethod("pm_test")
+        } throws ApiConnectionException("Stripe unavailable")
+
+        assertThrows<UpstreamException> { module.delete(1L, 1L) }
+
+        verify(exactly = 0) { cardDataAccess.markDeleted(any()) }
     }
 
     @Test
@@ -96,6 +136,22 @@ class CardModuleTest {
                 it.tenantId == tenant.id && it.stripePaymentMethodId == "pm_test" && it.last4 == "4242"
             })
         }
+    }
+
+    @Test
+    fun `card detail failure becomes upstream error without persisting card`() {
+        val tenant = TestFixtures.tenant(id = 1L).copy(stripeCustomerId = "cus_test")
+        every { cardDataAccess.findByStripePaymentMethodId("pm_test") } returns null
+        every { tenantDataAccess.findByStripeCustomerId("cus_test") } returns tenant
+        every {
+            stripeService.getCardDetails("pm_test")
+        } throws ApiConnectionException("Stripe unavailable")
+
+        assertThrows<UpstreamException> {
+            module.persistCardFromSetupIntent("cus_test", "pm_test")
+        }
+
+        verify(exactly = 0) { cardDataAccess.save(any()) }
     }
 
     @Test
