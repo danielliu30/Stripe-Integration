@@ -20,7 +20,9 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.sqs.SqsClient
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest
+import software.amazon.awssdk.services.sqs.model.GetQueueAttributesRequest
 import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName
+import software.amazon.awssdk.services.sqs.model.QueueAttributeName
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest
 import java.net.URI
@@ -33,6 +35,7 @@ class SqsWorkerRetryIntegrationTest {
     private val objectMapper = jacksonObjectMapper()
     private lateinit var sqsClient: SqsClient
     private lateinit var queueUrl: String
+    private lateinit var deadLetterQueueUrl: String
 
     @BeforeEach
     fun setUp() {
@@ -43,8 +46,28 @@ class SqsWorkerRetryIntegrationTest {
                 StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))
             )
             .build()
+        val suffix = System.nanoTime()
+        deadLetterQueueUrl = sqsClient.createQueue(
+            CreateQueueRequest.builder().queueName("retry-dlq-$suffix").build()
+        ).queueUrl()
+        val deadLetterQueueArn = requireNotNull(
+            sqsClient.getQueueAttributes(
+                GetQueueAttributesRequest.builder()
+                    .queueUrl(deadLetterQueueUrl)
+                    .attributeNames(QueueAttributeName.QUEUE_ARN)
+                    .build()
+            ).attributes()[QueueAttributeName.QUEUE_ARN]
+        )
         queueUrl = sqsClient.createQueue(
-            CreateQueueRequest.builder().queueName("retry-${System.nanoTime()}").build()
+            CreateQueueRequest.builder()
+                .queueName("retry-$suffix")
+                .attributes(
+                    mapOf(
+                        QueueAttributeName.REDRIVE_POLICY to
+                            """{"deadLetterTargetArn":"$deadLetterQueueArn","maxReceiveCount":"2"}"""
+                    )
+                )
+                .build()
         ).queueUrl()
     }
 
@@ -55,15 +78,7 @@ class SqsWorkerRetryIntegrationTest {
 
     @Test
     fun `failed message stays hidden until policy delay then returns with next receive count`() {
-        val worker = SqsWorker(
-            sqsClient,
-            objectMapper,
-            RetryDelayPolicy(Duration.ofSeconds(1), Duration.ofSeconds(2), 0.0),
-            listOf(FailingJob()),
-            queueUrl,
-            1,
-            30,
-        )
+        val worker = worker()
         sqsClient.sendMessage(
             SendMessageRequest.builder()
                 .queueUrl(queueUrl)
@@ -83,9 +98,40 @@ class SqsWorkerRetryIntegrationTest {
         )
     }
 
-    private fun receive() = sqsClient.receiveMessage(
+    @Test
+    fun `message moves to dead letter queue after maximum receives`() {
+        val worker = worker()
+        sqsClient.sendMessage(
+            SendMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .messageBody(objectMapper.writeValueAsString(BackgroundJobRequest()))
+                .build()
+        )
+
+        worker.poll()
+        Thread.sleep(1_200)
+        worker.poll()
+        Thread.sleep(2_200)
+        worker.poll()
+
+        assertTrue(receive().isEmpty())
+        val deadLetters = receive(deadLetterQueueUrl)
+        assertEquals(1, deadLetters.size)
+    }
+
+    private fun worker() = SqsWorker(
+        sqsClient,
+        objectMapper,
+        RetryDelayPolicy(Duration.ofSeconds(1), Duration.ofSeconds(2), 0.0),
+        listOf(FailingJob()),
+        queueUrl,
+        1,
+        30,
+    )
+
+    private fun receive(url: String = queueUrl) = sqsClient.receiveMessage(
         ReceiveMessageRequest.builder()
-            .queueUrl(queueUrl)
+            .queueUrl(url)
             .maxNumberOfMessages(1)
             .waitTimeSeconds(0)
             .messageSystemAttributeNames(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT)
