@@ -11,4 +11,5 @@ data class Card(
     val expMonth: Int,
     val expYear: Int,
     val createdAt: Instant = Instant.now(),
+    val deletedAt: Instant? = null,
 )

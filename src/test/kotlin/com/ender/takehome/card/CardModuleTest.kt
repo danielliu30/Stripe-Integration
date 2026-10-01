@@ -12,6 +12,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.time.Instant
 
 class CardModuleTest {
 
@@ -48,16 +49,16 @@ class CardModuleTest {
     }
 
     @Test
-    fun `deletes tenant owned card from Stripe and database`() {
+    fun `detaches and deactivates tenant owned card`() {
         val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030)
         every { cardDataAccess.findById(1L) } returns card
         every { stripeService.detachPaymentMethod("pm_test") } returns Unit
-        every { cardDataAccess.delete(1L) } returns Unit
+        every { cardDataAccess.markDeleted(1L) } returns Unit
 
         module.delete(1L, 1L)
 
         verify { stripeService.detachPaymentMethod("pm_test") }
-        verify { cardDataAccess.delete(1L) }
+        verify { cardDataAccess.markDeleted(1L) }
     }
 
     @Test
@@ -66,7 +67,18 @@ class CardModuleTest {
 
         assertThrows<ResourceNotFoundException> { module.delete(1L, 1L) }
         verify(exactly = 0) { stripeService.detachPaymentMethod(any()) }
-        verify(exactly = 0) { cardDataAccess.delete(any()) }
+        verify(exactly = 0) { cardDataAccess.markDeleted(any()) }
+    }
+
+    @Test
+    fun `repeated deletion does not detach card again`() {
+        val card = Card(1L, 1L, "pm_test", "visa", "4242", 12, 2030, deletedAt = Instant.now())
+        every { cardDataAccess.findById(1L) } returns card
+
+        module.delete(1L, 1L)
+
+        verify(exactly = 0) { stripeService.detachPaymentMethod(any()) }
+        verify(exactly = 0) { cardDataAccess.markDeleted(any()) }
     }
 
     @Test

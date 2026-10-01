@@ -6,6 +6,7 @@ import com.ender.takehome.model.Card
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.springframework.stereotype.Component
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 @Component
@@ -14,6 +15,13 @@ class CardDataAccess(private val dsl: DSLContext) {
     fun findById(id: Long): Card? =
         dsl.selectFrom(CARDS)
             .where(CARDS.ID.eq(id))
+            .fetchOne()
+            ?.toModel()
+
+    fun findActiveById(id: Long): Card? =
+        dsl.selectFrom(CARDS)
+            .where(CARDS.ID.eq(id))
+            .and(CARDS.DELETED_AT.isNull)
             .fetchOne()
             ?.toModel()
 
@@ -33,15 +41,18 @@ class CardDataAccess(private val dsl: DSLContext) {
     fun findByTenantIdCursor(tenantId: Long, startAfterId: Long?, limit: Int): List<Card> =
         dsl.selectFrom(CARDS)
             .where(CARDS.TENANT_ID.eq(tenantId))
+            .and(CARDS.DELETED_AT.isNull)
             .and(if (startAfterId != null) CARDS.ID.gt(startAfterId) else DSL.noCondition())
             .orderBy(CARDS.ID)
             .limit(limit)
             .fetch()
             .map { it.toModel() }
 
-    fun delete(id: Long) {
-        dsl.deleteFrom(CARDS)
+    fun markDeleted(id: Long) {
+        dsl.update(CARDS)
+            .set(CARDS.DELETED_AT, LocalDateTime.now(ZoneOffset.UTC))
             .where(CARDS.ID.eq(id))
+            .and(CARDS.DELETED_AT.isNull)
             .execute()
     }
 
@@ -68,5 +79,6 @@ class CardDataAccess(private val dsl: DSLContext) {
         expMonth = expMonth!!,
         expYear = expYear!!,
         createdAt = createdAt!!.toInstant(ZoneOffset.UTC),
+        deletedAt = deletedAt?.toInstant(ZoneOffset.UTC),
     )
 }

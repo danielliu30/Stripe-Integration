@@ -1,5 +1,6 @@
 package com.ender.takehome
 
+import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
@@ -13,6 +14,8 @@ import com.stripe.param.PaymentMethodAttachParams
 import com.stripe.param.PaymentMethodCreateParams
 import com.stripe.param.RefundCreateParams
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -51,6 +54,9 @@ class RealStripeCardSetupIntegrationTest {
 
     @Autowired
     private lateinit var ledgerDataAccess: LedgerDataAccess
+
+    @Autowired
+    private lateinit var cardDataAccess: CardDataAccess
 
     @Autowired
     private lateinit var stripePaymentService: StripePaymentService
@@ -169,6 +175,12 @@ class RealStripeCardSetupIntegrationTest {
             val refunded = ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).single()
             assertEquals(PaymentStatus.REFUNDED, refunded.status)
             assertEquals("PENDING", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
+
+            mockMvc.delete("/api/cards/$cardId") {
+                header("Authorization", "Bearer $token")
+            }.andExpect { status { isNoContent() } }
+            assertNotNull(cardDataAccess.findById(cardId)?.deletedAt)
+            assertNull(stripeClient.v1().paymentMethods().retrieve(paymentMethod.id).customer)
         } finally {
             customerId?.let { stripeClient.v1().customers().delete(it) }
         }
