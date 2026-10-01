@@ -140,6 +140,19 @@ MISSING_HEADER_STATUS=$(curl --silent --output "$LOG_DIR/missing-header.json" --
   fail "missing Idempotency-Key returned HTTP $MISSING_HEADER_STATUS"
 [[ $(json_field message <"$LOG_DIR/missing-header.json") == "Missing required header: Idempotency-Key" ]] ||
   fail "missing Idempotency-Key returned unexpected error message"
+WEBHOOK_PAYLOAD='{"id":"evt_compose_incomplete","object":"event","type":"payment_intent.succeeded","data":{"object":{"id":"pi_incomplete","object":"payment_intent","status":"succeeded"}}}'
+WEBHOOK_TIMESTAMP=$(date +%s)
+WEBHOOK_SIGNATURE=$(PAYLOAD="$WEBHOOK_PAYLOAD" TIMESTAMP="$WEBHOOK_TIMESTAMP" python3 -c \
+  'import hashlib,hmac,os; value=os.environ["TIMESTAMP"]+"."+os.environ["PAYLOAD"]; print(hmac.new(b"whsec_compose_smoke", value.encode(), hashlib.sha256).hexdigest())')
+PAYMENTS_BEFORE_WEBHOOK=$(mysql_value "SELECT COUNT(*) FROM payments;")
+WEBHOOK_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  -X POST "$API_URL/api/webhooks/stripe" \
+  -H 'Content-Type: application/json' \
+  -H "Stripe-Signature: t=$WEBHOOK_TIMESTAMP,v1=$WEBHOOK_SIGNATURE" \
+  -d "$WEBHOOK_PAYLOAD")
+[[ "$WEBHOOK_STATUS" == "200" ]] || fail "signed incomplete webhook returned HTTP $WEBHOOK_STATUS"
+[[ $(mysql_value "SELECT COUNT(*) FROM payments;") == "$PAYMENTS_BEFORE_WEBHOOK" ]] ||
+  fail "signed incomplete webhook mutated payments"
 
 docker compose exec -T mysql mysql -uroot -ppassword takehome -e \
   "UPDATE tenants SET stripe_customer_id='cus_compose_smoke' WHERE id=1;

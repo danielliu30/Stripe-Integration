@@ -130,6 +130,7 @@ class StripeServiceImpl(
 
     override fun parseWebhookEvent(payload: String, signature: String): StripeWebhookEvent {
         val event = Webhook.constructEvent(payload, signature, webhookSecret)
+        if (event.apiVersion.isNullOrBlank()) return UnhandledStripeWebhookEvent
         val stripeObject = event.dataObjectDeserializer.`object`.orElse(null)
         return when (event.type) {
             "setup_intent.succeeded" -> {
