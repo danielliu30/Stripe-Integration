@@ -33,6 +33,26 @@ unit-and-integration:
       - build/reports/tests/test
       - build/reports/tests/integrationTest
 
+compose-smoke:
+  stage: test
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+    COMPOSE_INFRA_HOST: "docker"
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  before_script:
+    - apk add --no-cache bash curl openjdk17-jdk python3
+  script:
+    - ./scripts/compose-smoke.sh
+  artifacts:
+    when: always
+    paths:
+      - build/compose-smoke
+
 stripe-e2e:
   stage: test
   image: gradle:8.12.1-jdk17
