@@ -222,8 +222,8 @@ class LedgerModule(
      * also settles the rent charge in this transaction through [settlePayment].
      *
      * Unknown PaymentIntents are acknowledged without mutation because a Stripe account may contain
-     * objects created by another environment. Refund events are intentionally excluded until the
-     * refund workflow can update both the payment and rent-charge balance together.
+     * objects created by another environment. A full refund reopens the charge in the same
+     * transaction so its outstanding balance cannot disagree with the payment lifecycle.
      */
     @Transactional
     fun applyStripePaymentEvent(paymentIntentId: String, status: PaymentStatus, failureReason: String? = null) {
@@ -240,9 +240,16 @@ class LedgerModule(
         paymentIntentId: String,
     ): Payment {
         val payment = dataAccess.updatePaymentStatus(paymentId, status, failureReason, paymentIntentId)
-        if (status == PaymentStatus.SUCCEEDED) {
-            val charge = requireNotNull(dataAccess.findChargeById(payment.rentChargeId))
-            dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PAID))
+        when (status) {
+            PaymentStatus.SUCCEEDED -> {
+                val charge = requireNotNull(dataAccess.findChargeById(payment.rentChargeId))
+                dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PAID))
+            }
+            PaymentStatus.REFUNDED -> {
+                val charge = requireNotNull(dataAccess.findChargeById(payment.rentChargeId))
+                dataAccess.saveCharge(charge.copy(status = RentChargeStatus.PENDING))
+            }
+            else -> Unit
         }
         return payment
     }
@@ -269,7 +276,7 @@ class LedgerModule(
         /**
          * Forward-only Stripe transitions for one local payment attempt. `FAILED` is terminal for
          * this attempt; a later client retry creates a new local payment and PaymentIntent.
-         * `REFUNDED` is reserved for the separate refund workflow.
+         * Only a succeeded payment can become fully refunded.
          */
         val allowedStripeTransitions = mapOf(
             PaymentStatus.INITIATED to setOf(
@@ -284,7 +291,7 @@ class LedgerModule(
                 PaymentStatus.FAILED,
             ),
             PaymentStatus.PROCESSING to setOf(PaymentStatus.SUCCEEDED, PaymentStatus.FAILED),
-            PaymentStatus.SUCCEEDED to emptySet(),
+            PaymentStatus.SUCCEEDED to setOf(PaymentStatus.REFUNDED),
             PaymentStatus.FAILED to emptySet(),
             PaymentStatus.REFUNDED to emptySet(),
         )

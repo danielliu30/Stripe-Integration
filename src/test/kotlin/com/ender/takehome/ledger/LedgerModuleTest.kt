@@ -262,6 +262,28 @@ class LedgerModuleTest {
     }
 
     @Test
+    fun `refund webhook marks succeeded payment refunded and reopens charge`() {
+        val succeeded = Payment(
+            id = 10L,
+            rentChargeId = rentCharge.id,
+            amount = rentCharge.amount,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = PaymentStatus.SUCCEEDED,
+            stripePaymentIntentId = "pi_test",
+            recordedBy = tenant.email,
+        )
+        every { dataAccess.findPaymentByStripePaymentIntentIdForUpdate("pi_test") } returns succeeded
+        every { dataAccess.updatePaymentStatus(10L, PaymentStatus.REFUNDED, null, "pi_test") } returns
+            succeeded.copy(status = PaymentStatus.REFUNDED)
+        every { dataAccess.findChargeById(rentCharge.id) } returns rentCharge.copy(status = RentChargeStatus.PAID)
+        every { dataAccess.saveCharge(any()) } answers { firstArg() }
+
+        module.applyStripePaymentEvent("pi_test", PaymentStatus.REFUNDED)
+
+        verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PENDING }) }
+    }
+
+    @Test
     fun `recordPayment creates payment and marks charge as paid`() {
         val request = RecordPaymentRequest(
             rentChargeId = rentCharge.id,

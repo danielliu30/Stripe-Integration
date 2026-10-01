@@ -95,7 +95,7 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
-    fun `signed Stripe webhook settles a processing payment`() {
+    fun `signed Stripe webhooks settle and fully refund a processing payment`() {
         val paymentIntentId = "pi_${UUID.randomUUID()}"
         val payment = ledgerDataAccess.savePayment(
             Payment(
@@ -127,6 +127,33 @@ class CardPaymentIntegrationTest {
             .single { it.id == payment.id }
         assertEquals(PaymentStatus.SUCCEEDED, settled.status)
         assertEquals("PAID", ledgerDataAccess.findChargeById(1L)?.status?.name)
+
+        val refundPayload = """
+            {
+              "id": "evt_${UUID.randomUUID()}",
+              "object": "event",
+              "api_version": "${Stripe.API_VERSION}",
+              "type": "charge.refunded",
+              "data": {
+                "object": {
+                  "id": "ch_${UUID.randomUUID()}",
+                  "object": "charge",
+                  "payment_intent": "$paymentIntentId",
+                  "refunded": true
+                }
+              }
+            }
+        """.trimIndent()
+        mockMvc.post("/api/webhooks/stripe") {
+            contentType = MediaType.APPLICATION_JSON
+            content = refundPayload
+            header("Stripe-Signature", signature(refundPayload))
+        }.andExpect { status { isOk() } }
+
+        val refunded = ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 10)
+            .single { it.id == payment.id }
+        assertEquals(PaymentStatus.REFUNDED, refunded.status)
+        assertEquals("PENDING", ledgerDataAccess.findChargeById(1L)?.status?.name)
     }
 
     @Test
