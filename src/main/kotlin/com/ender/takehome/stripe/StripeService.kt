@@ -3,6 +3,7 @@ package com.ender.takehome.stripe
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.Tenant
 import com.stripe.StripeClient
+import com.stripe.model.Charge
 import com.stripe.model.PaymentIntent
 import com.stripe.model.SetupIntent
 import com.stripe.net.RequestOptions
@@ -149,6 +150,11 @@ class StripeServiceImpl(
                 PaymentStatus.FAILED,
                 "Payment canceled",
             ) ?: UnhandledStripeWebhookEvent
+            "charge.refunded" -> (stripeObject as? Charge)
+                ?.takeIf { it.refunded }
+                ?.paymentIntent
+                ?.let { StripePaymentUpdated(it, PaymentStatus.REFUNDED) }
+                ?: UnhandledStripeWebhookEvent
             else -> UnhandledStripeWebhookEvent
         }
     }

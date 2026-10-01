@@ -42,6 +42,24 @@ class StripeServiceTest {
     }
 
     @Test
+    fun `translates only a fully refunded charge`() {
+        val payload = refundPayload(refunded = true)
+
+        val event = service.parseWebhookEvent(payload, signature(payload))
+
+        assertEquals(StripePaymentUpdated("pi_test", PaymentStatus.REFUNDED), event)
+    }
+
+    @Test
+    fun `ignores a partially refunded charge`() {
+        val payload = refundPayload(refunded = false)
+
+        val event = service.parseWebhookEvent(payload, signature(payload))
+
+        assertEquals(UnhandledStripeWebhookEvent, event)
+    }
+
+    @Test
     fun `rejects invalid webhook signature`() {
         assertThrows<SignatureVerificationException> {
             service.parseWebhookEvent(payload(), "t=1,v1=invalid")
@@ -78,6 +96,23 @@ class StripeServiceTest {
               "object": "payment_intent",
               "status": "requires_payment_method",
               "last_payment_error": { "message": "Card declined" }
+            }
+          }
+        }
+    """.trimIndent()
+
+    private fun refundPayload(refunded: Boolean) = """
+        {
+          "id": "evt_refund_test",
+          "object": "event",
+          "api_version": "${Stripe.API_VERSION}",
+          "type": "charge.refunded",
+          "data": {
+            "object": {
+              "id": "ch_test",
+              "object": "charge",
+              "payment_intent": "pi_test",
+              "refunded": $refunded
             }
           }
         }

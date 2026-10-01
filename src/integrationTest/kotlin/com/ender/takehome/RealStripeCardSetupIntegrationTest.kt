@@ -1,6 +1,7 @@
 package com.ender.takehome
 
 import com.ender.takehome.ledger.LedgerDataAccess
+import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.stripe.StripePaymentService
 import com.ender.takehome.tenant.TenantDataAccess
@@ -10,6 +11,7 @@ import com.stripe.StripeClient
 import com.stripe.param.PaymentIntentListParams
 import com.stripe.param.PaymentMethodAttachParams
 import com.stripe.param.PaymentMethodCreateParams
+import com.stripe.param.RefundCreateParams
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -158,6 +160,15 @@ class RealStripeCardSetupIntegrationTest {
                 1,
                 paymentIntents.data.count { it.metadata["rentChargeId"] == charge.id.toString() },
             )
+
+            val payment = ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).single()
+            val refund = stripeClient.v1().refunds().create(
+                RefundCreateParams.builder().setPaymentIntent(payment.stripePaymentIntentId).build()
+            )
+            postRefundWebhook(requireNotNull(refund.charge), requireNotNull(payment.stripePaymentIntentId))
+            val refunded = ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).single()
+            assertEquals(PaymentStatus.REFUNDED, refunded.status)
+            assertEquals("PENDING", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
         } finally {
             customerId?.let { stripeClient.v1().customers().delete(it) }
         }
@@ -196,6 +207,30 @@ class RealStripeCardSetupIntegrationTest {
                         "object" to "setup_intent",
                         "customer" to customerId,
                         "payment_method" to paymentMethodId,
+                    )
+                ),
+            )
+        )
+        mockMvc.post("/api/webhooks/stripe") {
+            contentType = MediaType.APPLICATION_JSON
+            content = payload
+            header("Stripe-Signature", signature(payload))
+        }.andExpect { status { isOk() } }
+    }
+
+    private fun postRefundWebhook(chargeId: String, paymentIntentId: String) {
+        val payload = objectMapper.writeValueAsString(
+            mapOf(
+                "id" to "evt_${UUID.randomUUID()}",
+                "object" to "event",
+                "api_version" to Stripe.API_VERSION,
+                "type" to "charge.refunded",
+                "data" to mapOf(
+                    "object" to mapOf(
+                        "id" to chargeId,
+                        "object" to "charge",
+                        "payment_intent" to paymentIntentId,
+                        "refunded" to true,
                     )
                 ),
             )
