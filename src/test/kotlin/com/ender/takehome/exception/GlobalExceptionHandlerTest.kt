@@ -6,8 +6,21 @@ import org.junit.jupiter.api.Test
 import org.springframework.core.MethodParameter
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.MissingRequestHeaderException
+import org.springframework.web.server.ResponseStatusException
 
 class GlobalExceptionHandlerTest {
+
+    @Test
+    fun `response status exception keeps unauthorized contract`() {
+        val response = GlobalExceptionHandler().handleResponseStatus(
+            ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials")
+        )
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.statusCode)
+        assertEquals(401, response.body?.status)
+        assertEquals("Unauthorized", response.body?.error)
+        assertEquals("Invalid credentials", response.body?.message)
+    }
 
     @Test
     fun `missing request header returns structured bad request`() {

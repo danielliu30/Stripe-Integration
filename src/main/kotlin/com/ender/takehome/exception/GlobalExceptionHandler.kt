@@ -6,6 +6,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 data class ErrorResponse(
@@ -35,6 +36,14 @@ class GlobalExceptionHandler {
         ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
             ErrorResponse(502, "Bad Gateway", ex.message ?: "Upstream service unavailable")
         )
+
+    @ExceptionHandler(ResponseStatusException::class)
+    fun handleResponseStatus(ex: ResponseStatusException): ResponseEntity<ErrorResponse> {
+        val status = HttpStatus.resolve(ex.statusCode.value()) ?: HttpStatus.INTERNAL_SERVER_ERROR
+        return ResponseEntity.status(status).body(
+            ErrorResponse(status.value(), status.reasonPhrase, ex.reason ?: status.reasonPhrase)
+        )
+    }
 
     @ExceptionHandler(MissingRequestHeaderException::class)
     fun handleMissingHeader(ex: MissingRequestHeaderException): ResponseEntity<ErrorResponse> =
