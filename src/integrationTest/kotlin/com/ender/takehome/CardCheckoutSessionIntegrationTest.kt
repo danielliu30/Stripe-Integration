@@ -6,8 +6,10 @@ import com.ender.takehome.stripe.UnhandledStripeWebhookEvent
 import com.ender.takehome.stripe.StripeCardDetails
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.exception.ApiConnectionException
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -43,6 +45,11 @@ class CardCheckoutSessionIntegrationTest {
     @Autowired
     private lateinit var stripeService: FakeStripeService
 
+    @BeforeEach
+    fun resetStripeService() {
+        stripeService.reset()
+    }
+
     @Test
     fun `creates Stripe customer once and returns checkout redirect URL`() {
         val login = mockMvc.post("/api/auth/login") {
@@ -63,6 +70,25 @@ class CardCheckoutSessionIntegrationTest {
         assertEquals("cus_test", tenantDataAccess.findById(1L)?.stripeCustomerId)
         assertEquals(1, stripeService.createCustomerCalls)
         assertEquals(listOf("cus_test", "cus_test"), stripeService.checkoutCustomerIds)
+    }
+
+    @Test
+    fun `checkout Stripe failure returns bad gateway`() {
+        val login = mockMvc.post("/api/auth/login") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"email":"alice.johnson@email.com","password":"password"}"""
+        }.andReturn()
+        val token = objectMapper.readTree(login.response.contentAsString).get("token").asText()
+        stripeService.failCheckout = true
+
+        mockMvc.post("/api/cards/checkout-session") {
+            header("Authorization", "Bearer $token")
+        }.andExpect {
+            status { isBadGateway() }
+            jsonPath("$.message") { value("Payment processor unavailable") }
+        }
+
+        assertEquals("cus_test", tenantDataAccess.findById(1L)?.stripeCustomerId)
     }
 
     @Test
@@ -109,6 +135,63 @@ class CardCheckoutSessionIntegrationTest {
     }
 
     @Test
+    fun `detach Stripe failure returns bad gateway without deleting card`() {
+        val login = mockMvc.post("/api/auth/login") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"email":"alice.johnson@email.com","password":"password"}"""
+        }.andReturn()
+        val token = objectMapper.readTree(login.response.contentAsString).get("token").asText()
+        val tenant = requireNotNull(tenantDataAccess.findById(1L))
+        tenantDataAccess.save(tenant.copy(stripeCustomerId = "cus_test"))
+        stripeService.setupEvent = SetupIntentSucceeded("cus_test", "pm_detach_failure")
+        mockMvc.post("/api/webhooks/stripe") {
+            header("Stripe-Signature", "valid-signature")
+            contentType = MediaType.APPLICATION_JSON
+            content = "{}"
+        }.andExpect { status { isOk() } }
+        val cards = mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $token")
+        }.andReturn()
+        val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+        stripeService.failDetach = true
+
+        mockMvc.delete("/api/cards/$cardId") {
+            header("Authorization", "Bearer $token")
+        }.andExpect {
+            status { isBadGateway() }
+            jsonPath("$.message") { value("Payment processor unavailable") }
+        }
+        mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $token")
+        }.andExpect { jsonPath("$.content.length()") { value(1) } }
+    }
+
+    @Test
+    fun `setup webhook Stripe detail failure returns bad gateway without saving card`() {
+        val login = mockMvc.post("/api/auth/login") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"email":"alice.johnson@email.com","password":"password"}"""
+        }.andReturn()
+        val token = objectMapper.readTree(login.response.contentAsString).get("token").asText()
+        val tenant = requireNotNull(tenantDataAccess.findById(1L))
+        tenantDataAccess.save(tenant.copy(stripeCustomerId = "cus_test"))
+        stripeService.setupEvent = SetupIntentSucceeded("cus_test", "pm_detail_failure")
+        stripeService.failCardDetails = true
+
+        mockMvc.post("/api/webhooks/stripe") {
+            header("Stripe-Signature", "valid-signature")
+            contentType = MediaType.APPLICATION_JSON
+            content = "{}"
+        }.andExpect {
+            status { isBadGateway() }
+            jsonPath("$.message") { value("Payment processor unavailable") }
+        }
+        mockMvc.get("/api/cards") {
+            header("Authorization", "Bearer $token")
+        }.andExpect { jsonPath("$.content.length()") { value(0) } }
+    }
+
+    @Test
     fun `setup webhook rejects missing signature`() {
         mockMvc.post("/api/webhooks/stripe") {
             contentType = MediaType.APPLICATION_JSON
@@ -151,8 +234,22 @@ class CardCheckoutSessionIntegrationTest {
         var createCustomerCalls = 0
         var cardDetailsCalls = 0
         var setupEvent: SetupIntentSucceeded? = null
+        var failCheckout = false
+        var failCardDetails = false
+        var failDetach = false
         val checkoutCustomerIds = mutableListOf<String>()
         val detachedPaymentMethodIds = mutableListOf<String>()
+
+        fun reset() {
+            createCustomerCalls = 0
+            cardDetailsCalls = 0
+            setupEvent = null
+            failCheckout = false
+            failCardDetails = false
+            failDetach = false
+            checkoutCustomerIds.clear()
+            detachedPaymentMethodIds.clear()
+        }
 
         override fun createCustomer(tenant: Tenant): String {
             createCustomerCalls++
@@ -161,6 +258,7 @@ class CardCheckoutSessionIntegrationTest {
 
         override fun createSetupCheckoutSession(customerId: String): String {
             checkoutCustomerIds += customerId
+            if (failCheckout) throw ApiConnectionException("Stripe unavailable")
             return "https://checkout.stripe.test/session"
         }
 
@@ -168,10 +266,12 @@ class CardCheckoutSessionIntegrationTest {
 
         override fun getCardDetails(paymentMethodId: String): StripeCardDetails {
             cardDetailsCalls++
+            if (failCardDetails) throw ApiConnectionException("Stripe unavailable")
             return StripeCardDetails("visa", "4242", 12, 2030)
         }
 
         override fun detachPaymentMethod(paymentMethodId: String) {
+            if (failDetach) throw ApiConnectionException("Stripe unavailable")
             detachedPaymentMethodIds += paymentMethodId
         }
     }

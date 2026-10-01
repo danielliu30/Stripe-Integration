@@ -2,9 +2,11 @@ package com.ender.takehome.card
 
 import com.ender.takehome.dto.response.CursorPage
 import com.ender.takehome.exception.ResourceNotFoundException
+import com.ender.takehome.exception.UpstreamException
 import com.ender.takehome.model.Card
 import com.ender.takehome.stripe.StripeService
 import com.ender.takehome.tenant.TenantDataAccess
+import com.stripe.exception.StripeException
 import org.springframework.stereotype.Service
 
 @Service
@@ -27,10 +29,11 @@ class CardModule(
     fun createSetupCheckoutSession(tenantId: Long): String {
         val tenant = tenantDataAccess.findById(tenantId)
             ?: throw ResourceNotFoundException("Tenant not found: $tenantId")
-        val customerId = tenant.stripeCustomerId ?: stripeService.createCustomer(tenant).also {
-            tenantDataAccess.save(tenant.copy(stripeCustomerId = it))
-        }
-        return stripeService.createSetupCheckoutSession(customerId)
+        val customerId = tenant.stripeCustomerId
+            ?: callStripe { stripeService.createCustomer(tenant) }.also {
+                tenantDataAccess.save(tenant.copy(stripeCustomerId = it))
+            }
+        return callStripe { stripeService.createSetupCheckoutSession(customerId) }
     }
 
     /**
@@ -43,7 +46,7 @@ class CardModule(
             throw ResourceNotFoundException("Card not found: $cardId")
         }
         if (card.deletedAt != null) return
-        stripeService.detachPaymentMethod(card.stripePaymentMethodId)
+        callStripe { stripeService.detachPaymentMethod(card.stripePaymentMethodId) }
         dataAccess.markDeleted(card.id)
     }
 
@@ -51,7 +54,7 @@ class CardModule(
     fun persistCardFromSetupIntent(customerId: String, paymentMethodId: String) {
         if (dataAccess.findByStripePaymentMethodId(paymentMethodId) != null) return
         val tenant = tenantDataAccess.findByStripeCustomerId(customerId) ?: return
-        val card = stripeService.getCardDetails(paymentMethodId)
+        val card = callStripe { stripeService.getCardDetails(paymentMethodId) }
         dataAccess.save(
             Card(
                 tenantId = tenant.id,
@@ -62,5 +65,12 @@ class CardModule(
                 expYear = card.expYear,
             )
         )
+    }
+
+    /** Keeps Stripe SDK failures behind the application upstream-error contract. */
+    private fun <T> callStripe(block: () -> T): T = try {
+        block()
+    } catch (exception: StripeException) {
+        throw UpstreamException("Payment processor unavailable", exception)
     }
 }
