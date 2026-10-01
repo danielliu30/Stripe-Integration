@@ -37,6 +37,7 @@ class LedgerModuleTest {
     private val tenantDataAccess = mockk<TenantDataAccess>()
     private val stripeService = mockk<StripePaymentService>()
     private val transactionHelper = mockk<TransactionHelper>()
+    private val recoveryDataAccess = mockk<PaymentRecoveryDataAccess>(relaxed = true)
     private val module = LedgerModule(
         dataAccess,
         cardDataAccess,
@@ -44,6 +45,7 @@ class LedgerModuleTest {
         tenantDataAccess,
         stripeService,
         transactionHelper,
+        recoveryDataAccess,
     )
 
     private val lease = TestFixtures.lease()
@@ -54,7 +56,15 @@ class LedgerModuleTest {
 
     @BeforeEach
     fun setUp() {
-        clearMocks(dataAccess, cardDataAccess, leaseDataAccess, tenantDataAccess, stripeService, transactionHelper)
+        clearMocks(
+            dataAccess,
+            cardDataAccess,
+            leaseDataAccess,
+            tenantDataAccess,
+            stripeService,
+            transactionHelper,
+            recoveryDataAccess,
+        )
         every { transactionHelper.executeWithRetry(any(), any(), any<() -> Any?>()) } answers {
             thirdArg<() -> Any?>().invoke()
         }
@@ -238,6 +248,26 @@ class LedgerModuleTest {
             stripeService.chargeCard("cus_test", "pm_test", rentCharge.amount, "test-key", any())
         }
         verify { dataAccess.saveCharge(match { it.status == RentChargeStatus.PAID }) }
+        verify(exactly = 1) { recoveryDataAccess.create(initiated.id, any()) }
+        verify(exactly = 1) { recoveryDataAccess.markCompleted(initiated.id, any()) }
+    }
+
+    @Test
+    fun `payCharge leaves payment and recovery pending when Stripe outcome is uncertain`() {
+        stubPaymentPreparation()
+        val initiated = recoverablePayment().copy(idempotencyKey = "test-key")
+        every { dataAccess.savePayment(any()) } returns initiated
+        every {
+            stripeService.chargeCard("cus_test", "pm_test", initiated.amount, "test-key", any())
+        } throws ApiConnectionException("Connection closed before Stripe responded")
+
+        assertThrows<UpstreamException> {
+            module.payCharge(principal, rentCharge.id, card.id, "test-key")
+        }
+
+        verify(exactly = 1) { recoveryDataAccess.create(initiated.id, any()) }
+        verify(exactly = 0) { recoveryDataAccess.markCompleted(any(), any()) }
+        verify(exactly = 0) { dataAccess.updatePaymentStatus(any(), any(), any(), any()) }
     }
 
     @Test
@@ -285,6 +315,7 @@ class LedgerModuleTest {
                 mapOf("paymentId" to initiated.id.toString(), "rentChargeId" to rentCharge.id.toString()),
             )
         }
+        verify(exactly = 1) { recoveryDataAccess.markCompleted(initiated.id, any()) }
     }
 
     @Test
@@ -301,6 +332,7 @@ class LedgerModuleTest {
         val result = requireNotNull(module.executeInitiatedPayment(initiated.id))
 
         assertEquals(PaymentStatus.FAILED, result.payment.status)
+        verify(exactly = 1) { recoveryDataAccess.markCompleted(initiated.id, any()) }
     }
 
     @Test
@@ -314,6 +346,7 @@ class LedgerModuleTest {
         assertThrows<UpstreamException> { module.executeInitiatedPayment(initiated.id) }
 
         verify(exactly = 0) { dataAccess.updatePaymentStatus(any(), any(), any(), any()) }
+        verify(exactly = 0) { recoveryDataAccess.markCompleted(any(), any()) }
     }
 
     @Test

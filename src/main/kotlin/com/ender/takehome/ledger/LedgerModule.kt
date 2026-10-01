@@ -21,9 +21,11 @@ import com.ender.takehome.tenant.TenantDataAccess
 import com.stripe.exception.CardException
 import com.stripe.exception.StripeException
 import org.jooq.exception.IntegrityConstraintViolationException
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 
 /** A persisted payment plus the safe card details needed by the API response. */
@@ -40,7 +42,12 @@ class LedgerModule(
     private val tenantDataAccess: TenantDataAccess,
     private val stripePaymentService: StripePaymentService,
     private val transactionHelper: TransactionHelper,
+    private val recoveryDataAccess: PaymentRecoveryDataAccess,
+    @Value("\${payment-recovery.initial-delay-seconds:30}") private val recoveryDelaySeconds: Long = 30,
 ) {
+    init {
+        require(recoveryDelaySeconds >= 0) { "Payment recovery delay must not be negative" }
+    }
 
     fun getChargeById(id: Long): RentCharge =
         dataAccess.findChargeById(id) ?: throw ResourceNotFoundException("Rent charge not found: $id")
@@ -97,13 +104,15 @@ class LedgerModule(
      * Pays the remaining balance of a tenant-owned rent charge with a tenant-owned saved card.
      *
      * Payment preparation runs in a short transaction that locks the rent charge, validates
-     * ownership and state, calculates the server-controlled amount, and inserts an `INITIATED`
-     * payment. The Stripe network call deliberately runs outside that transaction so a slow
-     * dependency cannot hold a database lock. Settlement then runs in a second transaction.
+     * ownership and state, calculates the server-controlled amount, and atomically inserts both an
+     * `INITIATED` payment and its durable recovery responsibility. The Stripe network call
+     * deliberately runs outside that transaction so a slow dependency cannot hold a database lock.
+     * Settlement and recovery completion then run in a second transaction.
      *
      * The client idempotency key is checked before preparation and stored on the payment. A
      * database uniqueness violation handles concurrent requests that both miss the first lookup.
-     * Replays return the existing tenant-owned payment without contacting Stripe again.
+     * Known-state replays return immediately; an `INITIATED` replay safely invokes the same recovery
+     * operation and Stripe idempotency key while durable queue dispatch is introduced separately.
      */
     fun payCharge(
         principal: UserPrincipal,
@@ -114,7 +123,12 @@ class LedgerModule(
         val tenantId = principal.tenantId
             ?: throw ResourceNotFoundException("Rent charge not found: $chargeId")
         val replay = dataAccess.findPaymentByIdempotencyKey(idempotencyKey)
-        if (replay != null) return replayPayment(replay, tenantId, chargeId)
+        if (replay != null) {
+            val result = replayPayment(replay, tenantId, chargeId)
+            return if (replay.status == PaymentStatus.INITIATED) {
+                executeInitiatedPayment(replay.id) ?: result
+            } else result
+        }
 
         val prepared = try {
             transactionHelper.executeWithRetry {
@@ -129,7 +143,7 @@ class LedgerModule(
             chargePreparedCard(prepared)
         } catch (exception: CardException) {
             val failed = transactionHelper.executeWithRetry {
-                dataAccess.updatePaymentStatus(
+                settlePayment(
                     prepared.payment.id,
                     PaymentStatus.FAILED,
                     exception.stripeError?.message ?: exception.message ?: "Card declined",
@@ -138,10 +152,7 @@ class LedgerModule(
             }
             return PaymentResult(failed, prepared.card)
         } catch (exception: StripeException) {
-            transactionHelper.executeWithRetry {
-                dataAccess.updatePaymentStatus(prepared.payment.id, PaymentStatus.FAILED, "Payment processor error")
-            }
-            throw UpstreamException("Payment processor unavailable", exception)
+            throw UpstreamException("Payment processor unavailable; recovery remains pending", exception)
         }
 
         val settled = transactionHelper.executeWithRetry {
@@ -194,8 +205,8 @@ class LedgerModule(
     }
 
     /**
-     * Runs inside the preparation transaction while holding the rent-charge row lock.
-     * No external Stripe operation may be added to this method.
+     * Runs inside the preparation transaction while holding the rent-charge row lock. The payment
+     * and recovery row commit or roll back together. No external Stripe operation may be added here.
      */
     private fun preparePayment(
         tenantId: Long,
@@ -239,6 +250,7 @@ class LedgerModule(
                 recordedBy = recordedBy,
             )
         )
+        recoveryDataAccess.create(payment.id, Instant.now().plusSeconds(recoveryDelaySeconds))
         return PreparedPayment(payment, card, customerId)
     }
 
@@ -316,7 +328,7 @@ class LedgerModule(
         } else payment
     }
 
-    /** Applies Stripe's synchronous result and marks the rent charge paid only on success. */
+    /** Applies a known Stripe result and completes its recovery responsibility in one transaction. */
     private fun settlePayment(
         paymentId: Long,
         status: PaymentStatus,
@@ -324,6 +336,7 @@ class LedgerModule(
         paymentIntentId: String?,
     ): Payment {
         val payment = dataAccess.updatePaymentStatus(paymentId, status, failureReason, paymentIntentId)
+        recoveryDataAccess.markCompleted(paymentId, Instant.now())
         when (status) {
             PaymentStatus.SUCCEEDED -> {
                 val charge = requireNotNull(dataAccess.findChargeById(payment.rentChargeId))
