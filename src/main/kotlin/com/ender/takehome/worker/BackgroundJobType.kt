@@ -11,4 +11,5 @@ package com.ender.takehome.worker
  */
 enum class BackgroundJobType {
     GENERATE_RENT_CHARGES,
+    RETRY_CARD_PAYMENT,
 }

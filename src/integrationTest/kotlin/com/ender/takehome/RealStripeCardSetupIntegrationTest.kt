@@ -2,7 +2,8 @@ package com.ender.takehome
 
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
-import com.ender.takehome.ledger.LedgerModule
+import com.ender.takehome.worker.RetryCardPaymentJob
+import com.ender.takehome.worker.RetryCardPaymentParams
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
 import com.ender.takehome.model.PaymentStatus
@@ -59,7 +60,7 @@ class RealStripeCardSetupIntegrationTest {
     private lateinit var ledgerDataAccess: LedgerDataAccess
 
     @Autowired
-    private lateinit var ledgerModule: LedgerModule
+    private lateinit var retryCardPaymentJob: RetryCardPaymentJob
 
     @Autowired
     private lateinit var cardDataAccess: CardDataAccess
@@ -162,10 +163,11 @@ class RealStripeCardSetupIntegrationTest {
                 ),
             )
 
-            val recovered = requireNotNull(ledgerModule.executeInitiatedPayment(initiated.id))
+            retryCardPaymentJob.process(RetryCardPaymentParams(initiated.id))
+            val recovered = ledgerDataAccess.findPaymentsByRentChargeIdCursor(recoveryCharge.id, null, 10).single()
 
-            assertEquals(original.paymentIntentId, recovered.payment.stripePaymentIntentId)
-            assertEquals(PaymentStatus.SUCCEEDED, recovered.payment.status)
+            assertEquals(original.paymentIntentId, recovered.stripePaymentIntentId)
+            assertEquals(PaymentStatus.SUCCEEDED, recovered.status)
             assertEquals("PAID", ledgerDataAccess.findChargeById(recoveryCharge.id)?.status?.name)
 
             val charge = ledgerDataAccess.saveCharge(

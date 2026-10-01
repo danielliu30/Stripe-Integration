@@ -2,7 +2,8 @@ package com.ender.takehome
 
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
-import com.ender.takehome.ledger.LedgerModule
+import com.ender.takehome.worker.RetryCardPaymentJob
+import com.ender.takehome.worker.RetryCardPaymentParams
 import com.ender.takehome.model.Card
 import com.ender.takehome.model.Payment
 import com.ender.takehome.model.PaymentMethod
@@ -61,7 +62,7 @@ class CardPaymentIntegrationTest {
     private lateinit var ledgerDataAccess: LedgerDataAccess
 
     @Autowired
-    private lateinit var ledgerModule: LedgerModule
+    private lateinit var retryCardPaymentJob: RetryCardPaymentJob
 
     @Autowired
     private lateinit var stripeService: FakeStripeService
@@ -127,9 +128,10 @@ class CardPaymentIntegrationTest {
             )
         )
 
-        val result = requireNotNull(ledgerModule.executeInitiatedPayment(initiated.id))
+        retryCardPaymentJob.process(RetryCardPaymentParams(initiated.id))
 
-        assertEquals(PaymentStatus.SUCCEEDED, result.payment.status)
+        val result = ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).single()
+        assertEquals(PaymentStatus.SUCCEEDED, result.status)
         assertEquals("PAID", ledgerDataAccess.findChargeById(charge.id)?.status?.name)
         assertEquals(1, ledgerDataAccess.findPaymentsByRentChargeIdCursor(charge.id, null, 10).size)
         assertEquals("persisted-recovery-key", stripeService.idempotencyKeys.last())
