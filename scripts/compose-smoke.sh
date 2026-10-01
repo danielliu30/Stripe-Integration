@@ -140,6 +140,17 @@ MISSING_HEADER_STATUS=$(curl --silent --output "$LOG_DIR/missing-header.json" --
   fail "missing Idempotency-Key returned HTTP $MISSING_HEADER_STATUS"
 [[ $(json_field message <"$LOG_DIR/missing-header.json") == "Missing required header: Idempotency-Key" ]] ||
   fail "missing Idempotency-Key returned unexpected error message"
+OVERSIZED_KEY=$(printf 'x%.0s' $(seq 1 256))
+OVERSIZED_KEY_STATUS=$(curl --silent --output "$LOG_DIR/oversized-idempotency-key.json" --write-out '%{http_code}' \
+  -X POST "$API_URL/api/rent-charges/1/pay" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $OVERSIZED_KEY" \
+  -d '{"cardId":1}')
+[[ "$OVERSIZED_KEY_STATUS" == "400" ]] ||
+  fail "oversized Idempotency-Key returned HTTP $OVERSIZED_KEY_STATUS"
+[[ $(json_field message <"$LOG_DIR/oversized-idempotency-key.json") == "Idempotency-Key must not exceed 255 characters" ]] ||
+  fail "oversized Idempotency-Key returned unexpected error message"
 WEBHOOK_PAYLOAD='{"id":"evt_compose_incomplete","object":"event","type":"payment_intent.succeeded","data":{"object":{"id":"pi_incomplete","object":"payment_intent","status":"succeeded"}}}'
 WEBHOOK_TIMESTAMP=$(date +%s)
 WEBHOOK_SIGNATURE=$(PAYLOAD="$WEBHOOK_PAYLOAD" TIMESTAMP="$WEBHOOK_TIMESTAMP" python3 -c \

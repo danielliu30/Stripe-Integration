@@ -302,6 +302,30 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
+    fun `payment request rejects invalid idempotency key values`() {
+        val token = login("alice.johnson@email.com")
+        val paymentCount = ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size
+        val invalidKeys = listOf(
+            "   " to "Idempotency-Key must not be blank",
+            "x".repeat(256) to "Idempotency-Key must not exceed 255 characters",
+        )
+
+        invalidKeys.forEach { (key, message) ->
+            mockMvc.post("/api/rent-charges/1/pay") {
+                header("Authorization", "Bearer $token")
+                header("Idempotency-Key", key)
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"cardId":1}"""
+            }.andExpect {
+                status { isBadRequest() }
+                jsonPath("$.message") { value(message) }
+            }
+        }
+
+        assertEquals(paymentCount, ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size)
+    }
+
+    @Test
     fun `database rejects duplicate payment idempotency key`() {
         val key = "database-${UUID.randomUUID()}"
         val payment = Payment(

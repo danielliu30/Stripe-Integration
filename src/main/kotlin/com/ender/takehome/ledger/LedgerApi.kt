@@ -71,7 +71,9 @@ class LedgerApi(
      *
      * The request selects only the card; ownership and amount are derived on the server. `202`
      * acknowledges durable payment ownership, not final success: an uncertain Stripe response returns
-     * the persisted `INITIATED` payment while its recovery proceeds asynchronously.
+     * the persisted `INITIATED` payment while its recovery proceeds asynchronously. The programmatic
+     * caller supplies a globally unique, high-entropy, nonblank key of at most 255 characters and
+     * reuses it only for retries of the same logical payment attempt.
      */
     @PostMapping("/api/rent-charges/{id}/pay")
     @ResponseStatus(HttpStatus.ACCEPTED)
@@ -81,6 +83,8 @@ class LedgerApi(
         @Valid @RequestBody request: PayChargeRequest,
         @RequestHeader("Idempotency-Key") idempotencyKey: String,
     ): PaymentResponse {
+        require(idempotencyKey.isNotBlank()) { "Idempotency-Key must not be blank" }
+        require(idempotencyKey.length <= 255) { "Idempotency-Key must not exceed 255 characters" }
         val result = ledgerModule.payCharge(UserPrincipal.current(), id, request.cardId, idempotencyKey)
         return PaymentResponse.from(result.payment, result.card)
     }
