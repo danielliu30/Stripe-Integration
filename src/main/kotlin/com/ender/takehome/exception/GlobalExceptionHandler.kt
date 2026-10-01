@@ -3,6 +3,7 @@ package com.ender.takehome.exception
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import java.time.Instant
@@ -33,6 +34,12 @@ class GlobalExceptionHandler {
     fun handleUpstream(ex: UpstreamException): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(
             ErrorResponse(502, "Bad Gateway", ex.message ?: "Upstream service unavailable")
+        )
+
+    @ExceptionHandler(MissingRequestHeaderException::class)
+    fun handleMissingHeader(ex: MissingRequestHeaderException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.badRequest().body(
+            ErrorResponse(400, "Bad Request", "Missing required header: ${ex.headerName}")
         )
 
     @ExceptionHandler(MethodArgumentNotValidException::class)

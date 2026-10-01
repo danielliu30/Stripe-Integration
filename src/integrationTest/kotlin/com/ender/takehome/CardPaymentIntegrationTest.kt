@@ -264,6 +264,23 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
+    fun `payment request without idempotency header returns bad request`() {
+        val token = login("alice.johnson@email.com")
+        val paymentCount = ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size
+
+        mockMvc.post("/api/rent-charges/1/pay") {
+            header("Authorization", "Bearer $token")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"cardId":1}"""
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.message") { value("Missing required header: Idempotency-Key") }
+        }
+
+        assertEquals(paymentCount, ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size)
+    }
+
+    @Test
     fun `database rejects duplicate payment idempotency key`() {
         val key = "database-${UUID.randomUUID()}"
         val payment = Payment(
