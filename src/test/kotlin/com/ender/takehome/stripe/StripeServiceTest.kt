@@ -60,6 +60,15 @@ class StripeServiceTest {
     }
 
     @Test
+    fun `acknowledges signed event without API version as unhandled`() {
+        val payload = payloadWithoutApiVersion()
+
+        val event = service.parseWebhookEvent(payload, signature(payload))
+
+        assertEquals(UnhandledStripeWebhookEvent, event)
+    }
+
+    @Test
     fun `rejects invalid webhook signature`() {
         assertThrows<SignatureVerificationException> {
             service.parseWebhookEvent(payload(), "t=1,v1=invalid")
@@ -78,6 +87,21 @@ class StripeServiceTest {
               "object": "setup_intent",
               "customer": "cus_test",
               "payment_method": "pm_test",
+              "status": "succeeded"
+            }
+          }
+        }
+    """.trimIndent()
+
+    private fun payloadWithoutApiVersion() = """
+        {
+          "id": "evt_incomplete",
+          "object": "event",
+          "type": "payment_intent.succeeded",
+          "data": {
+            "object": {
+              "id": "pi_incomplete",
+              "object": "payment_intent",
               "status": "succeeded"
             }
           }

@@ -202,6 +202,27 @@ class CardPaymentIntegrationTest {
     }
 
     @Test
+    fun `signed webhook without API version is acknowledged without payment mutation`() {
+        val paymentCount = ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size
+        val payload = """
+            {
+              "id": "evt_${UUID.randomUUID()}",
+              "object": "event",
+              "type": "payment_intent.succeeded",
+              "data": { "object": { "id": "pi_incomplete", "object": "payment_intent", "status": "succeeded" } }
+            }
+        """.trimIndent()
+
+        mockMvc.post("/api/webhooks/stripe") {
+            contentType = MediaType.APPLICATION_JSON
+            content = payload
+            header("Stripe-Signature", signature(payload))
+        }.andExpect { status { isOk() } }
+
+        assertEquals(paymentCount, ledgerDataAccess.findPaymentsByRentChargeIdCursor(1L, null, 100).size)
+    }
+
+    @Test
     fun `signed Stripe webhooks settle and fully refund a processing payment`() {
         val paymentIntentId = "pi_${UUID.randomUUID()}"
         val payment = ledgerDataAccess.savePayment(
