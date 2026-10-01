@@ -2,6 +2,9 @@ package com.ender.takehome
 
 import com.ender.takehome.card.CardDataAccess
 import com.ender.takehome.ledger.LedgerDataAccess
+import com.ender.takehome.ledger.LedgerModule
+import com.ender.takehome.model.Payment
+import com.ender.takehome.model.PaymentMethod
 import com.ender.takehome.model.PaymentStatus
 import com.ender.takehome.model.RentCharge
 import com.ender.takehome.stripe.StripePaymentService
@@ -54,6 +57,9 @@ class RealStripeCardSetupIntegrationTest {
 
     @Autowired
     private lateinit var ledgerDataAccess: LedgerDataAccess
+
+    @Autowired
+    private lateinit var ledgerModule: LedgerModule
 
     @Autowired
     private lateinit var cardDataAccess: CardDataAccess
@@ -130,6 +136,38 @@ class RealStripeCardSetupIntegrationTest {
                 header("Authorization", "Bearer $token")
             }.andReturn()
             val cardId = objectMapper.readTree(cards.response.contentAsString).get("content")[0].get("id").asLong()
+            val recoveryCharge = ledgerDataAccess.saveCharge(
+                RentCharge(leaseId = 2L, amount = BigDecimal("1.00"), dueDate = LocalDate.of(2098, 12, 1))
+            )
+            val recoveryKey = "real-recovery-${UUID.randomUUID()}"
+            val initiated = ledgerDataAccess.savePayment(
+                Payment(
+                    rentChargeId = recoveryCharge.id,
+                    amount = recoveryCharge.amount,
+                    paymentMethod = PaymentMethod.CREDIT_CARD,
+                    status = PaymentStatus.INITIATED,
+                    cardId = cardId,
+                    idempotencyKey = recoveryKey,
+                    recordedBy = "bob.smith@email.com",
+                )
+            )
+            val original = stripePaymentService.chargeCard(
+                customerId,
+                paymentMethod.id,
+                initiated.amount,
+                recoveryKey,
+                mapOf(
+                    "paymentId" to initiated.id.toString(),
+                    "rentChargeId" to recoveryCharge.id.toString(),
+                ),
+            )
+
+            val recovered = requireNotNull(ledgerModule.executeInitiatedPayment(initiated.id))
+
+            assertEquals(original.paymentIntentId, recovered.payment.stripePaymentIntentId)
+            assertEquals(PaymentStatus.SUCCEEDED, recovered.payment.status)
+            assertEquals("PAID", ledgerDataAccess.findChargeById(recoveryCharge.id)?.status?.name)
+
             val charge = ledgerDataAccess.saveCharge(
                 RentCharge(leaseId = 2L, amount = BigDecimal("1.00"), dueDate = LocalDate.of(2099, 1, 1))
             )
