@@ -20,6 +20,8 @@ unit-and-integration:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
   script:
+    - bash -n localstack-init/init-aws.sh
+    - test -x localstack-init/init-aws.sh
     - ./gradlew test integrationTest --rerun-tasks --no-daemon
   artifacts:
     when: always
