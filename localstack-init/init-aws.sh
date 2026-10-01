@@ -1,18 +1,26 @@
 #!/bin/bash
+set -euo pipefail
+
 echo "Initializing LocalStack resources..."
 
-# Create S3 bucket for file storage
-awslocal s3 mb s3://takehome-files
+if ! awslocal s3api head-bucket --bucket takehome-files >/dev/null 2>&1; then
+  awslocal s3api create-bucket --bucket takehome-files >/dev/null
+fi
 
-# Create the DLQ first so the worker queue can redrive after five failed deliveries
 DLQ_URL=$(awslocal sqs create-queue --queue-name takehome-jobs-dlq --query QueueUrl --output text)
 DLQ_ARN=$(awslocal sqs get-queue-attributes \
   --queue-url "$DLQ_URL" \
   --attribute-names QueueArn \
   --query 'Attributes.QueueArn' \
   --output text)
-awslocal sqs create-queue \
-  --queue-name takehome-jobs \
-  --attributes "RedrivePolicy={\"deadLetterTargetArn\":\"$DLQ_ARN\",\"maxReceiveCount\":\"5\"}"
+QUEUE_URL=$(awslocal sqs create-queue --queue-name takehome-jobs --query QueueUrl --output text)
+REDRIVE_POLICY=$(printf \
+  '{"deadLetterTargetArn":"%s","maxReceiveCount":"5"}' \
+  "$DLQ_ARN")
+ATTRIBUTES=$(REDRIVE_POLICY="$REDRIVE_POLICY" python3 -c \
+  'import json, os; print(json.dumps({"RedrivePolicy": os.environ["REDRIVE_POLICY"]}))')
+awslocal sqs set-queue-attributes \
+  --queue-url "$QUEUE_URL" \
+  --attributes "$ATTRIBUTES"
 
 echo "LocalStack initialization complete."
