@@ -57,6 +57,13 @@ stripe-e2e:
   stage: test
   image: gradle:8.12.1-jdk17
   resource_group: stripe-test-account
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+    TESTCONTAINERS_HOST_OVERRIDE: "docker"
   script:
     - ./gradlew stripeIntegrationTest --rerun-tasks --no-daemon
   artifacts:
