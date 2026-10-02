@@ -15,11 +15,8 @@ data class CursorPage<T>(
 ) {
     companion object {
         private const val MAX_LIMIT = 100
-        private const val DEFAULT_LIMIT = 20
 
         fun sanitizeLimit(limit: Int): Int = limit.coerceIn(1, MAX_LIMIT)
-
-        fun defaultLimit(): Int = DEFAULT_LIMIT
 
         /**
          * Build a CursorPage from a list fetched with limit+1 rows.
