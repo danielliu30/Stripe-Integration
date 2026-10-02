@@ -20,7 +20,7 @@ This repo contains a working property management platform with:
 
 - JDK 17+
 - Docker and Docker Compose
-- A Stripe test account
+- A Stripe account — use **test mode** (keys start with `sk_test_`; grab them from the Stripe dashboard's Developers → API keys page)
 - [Stripe CLI](https://docs.stripe.com/stripe-cli) (for local webhook testing)
 
 ## Setup
